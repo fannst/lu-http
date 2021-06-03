@@ -1,0 +1,14 @@
+{
+    "files.exclude": {
+        "**/.git": true,
+        "**/.svn": true,
+        "**/.hg": true,
+        "**/CVS": true,
+        "**/.DS_Store": true,
+        "**/*.arm.o": true,
+        "**/*.elf": true
+    },
+    "files.associations": {
+        "main.h": "c"
+    }
+}
