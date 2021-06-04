@@ -18,59 +18,43 @@ void __http_server_socket_log (http_server_socket_t *sock, const char *format, .
     printf ("\r\n");
 }
 
-/// Creates the thread pools for the HTTP server socket instance.
-int32_t __http_server_socket_new__create_thread_pools (http_server_socket_t *sock) {
-    sock->pools = (http_server_socket_thread_pool_t *) calloc (sock->thread_pool_count, sizeof (http_server_socket_thread_pool_t));
-    if (sock->pools == NULL) {
-        free (sock);
-        return -1;
-    }
-
-    return 0;
-}
-
 /// Creates an new HTTP server socket instance.
-int32_t http_server_socket_new (http_server_socket_t **sock, size_t thread_pool_count) {
+http_server_socket_t *http_server_socket_create (size_t thread_pool_count, size_t max_socket_count) {
     // Allocates the memory required for the server socket structure.
-    *sock = (http_server_socket_t *) calloc (1, sizeof (http_server_socket_t));
-    if (sock == NULL)
-        return -1;
+    http_server_socket_t *server_socket = (http_server_socket_t *) calloc (1, sizeof (http_server_socket_t));
+    if (server_socket == NULL)
+        return NULL;
 
     // Sets the default values.
-    (*sock)->flags = 0;
-    (*sock)->thread_pool_count = thread_pool_count;
+    server_socket->flags = 0;
+    server_socket->thread_pool_count = thread_pool_count;
 
-    // Creates the memory required for the thread pools.
-    if (__http_server_socket_new__create_thread_pools (*sock) < 0) {
-        free (*sock);
-        *sock = NULL;
-        return -2;
+    // Allocates the memory for the socket pool-pointer array.
+    server_socket->pools = (http_server_socket_pool_t **) malloc (thread_pool_count * sizeof (http_server_socket_pool_t *));
+    if (server_socket->pools == NULL) {
+        free (server_socket);
+        return NULL;
     }
 
-    // Creates the socket.
-    if (((*sock)->fd = socket (AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
-        perror ("socket (AF_INET, SOCK_STREAM, IPPROTO_TCP) failed");
-
-        free ((*sock)->pools);
-
-        free (*sock);
-        *sock = NULL;
-
-        return -3;
-    }
-
-    // Initializes the mutexes.
-    for (size_t i = 0; i < (*sock)->thread_pool_count; ++i) {
-        http_server_socket_thread_pool_t *pool = &((*sock)->pools[i]);
-        if (pthread_mutex_init (&pool->mutex, NULL) != 0) {
-            perror ("pthread_mutex_init () failde");
-            return -5;
+    // Creates the socket pool instances.
+    for (size_t i = 0; i < server_socket->thread_pool_count; ++i) {
+        server_socket->pools[i] = __http_server_socket_pool_create (max_socket_count);
+        if (server_socket->pools[i] == NULL) {
+            free (server_socket);
+            for (size_t j = 0; j < i; ++j)
+                __http_server_socket_pool_free (&server_socket->pools[j]);
+            return NULL;
         }
     }
 
-    if (pthread_mutex_init (&(*sock)->struct_mutex, NULL) != 0) {
-        perror ("pthread_mutex_init () failed");
-        return -4;
+    return server_socket;
+}
+
+/// Initializes an HTTP server socket instance.
+int32_t http_server_socket_init (http_server_socket_t *sock) {
+    if ((sock->fd = socket (AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
+        perror ("socket () failed");
+        return -1;
     }
 
     return 0;
@@ -78,35 +62,18 @@ int32_t http_server_socket_new (http_server_socket_t **sock, size_t thread_pool_
 
 /// Frees an HTTP server socket instance.
 int32_t http_server_socket_free (http_server_socket_t **sock) {
-    // Makes sure that we're not dealing with a null pointer-pointer.
-    if (*sock == NULL)
+    // Destroys the acceptor mutex.
+    if (pthread_mutex_destroy (&(*sock)->acceptor_mutex) != 0) {
+        perror ("pthread_mutex_destroy () failed");
         return -1;
-
-    // Sets the shutdown flag, and waits the thread to be shut down.
-    (*sock)->flags |= HTTP_SERVER_SOCKET_THREADS_SHUTDOWN_FLAG;
-    
-    pthread_join ((*sock)->acceptor_thread_id, NULL);
-    for (size_t i = 0; i < (*sock)->thread_pool_count; ++i) {
-        http_server_socket_thread_pool_t *pool = &((*sock)->pools[i]);
-
-        pthread_join (pool->thread, NULL);
-
-        __http_socket_pool__close_and_free_all_sockets (pool);
-        
-        pthread_mutex_destroy (&pool->mutex);
     }
 
-    pthread_mutex_destroy (&(*sock)->struct_mutex);
+    // Frees all the individual pools.
+    for (size_t i = 0; i < (*sock)->thread_pool_count; ++i)
+        __http_server_socket_pool_free (&(*sock)->pools[i]);
 
-    // Closes the open socket.
-    if (close ((*sock)->fd) < 0) {
-        perror ("close () failed");
-        return -2;
-    }
-
-    // Frees the struture, and sets it to null.
+    // Frees the actual memory.
     free ((*sock)->pools);
-
     free (*sock);
     *sock = NULL;
 
@@ -156,35 +123,133 @@ int32_t http_server_socket_listen (http_server_socket_t *sock) {
     return 0;
 }
 
+/// Stops an HTTP server socket instance.
+int32_t http_server_socket_stop (http_server_socket_t *sock) {
+
+    // Closes the FD.
+    if (close (sock->fd) != 0) {
+        perror ("close () failed");
+        return -2;
+    }
+
+    // Closes the acceptor.
+    __http_server_socket_stop_acceptor (sock);
+
+    // Closes all the socket pools.
+    for (size_t i = 0; i < sock->thread_pool_count; ++i) {
+        if (__http_server_socket_pool_stop (sock->pools[i]) != 0) {
+            fprintf (stderr, "__http_server_socket_pool_stop () failed");
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // HTTP Server Socket Pooling
 ///////////////////////////////////////////////////////////////////////////////
 
-/// Closes and removes all sockets.
-void __http_socket_pool__close_and_free_all_sockets (http_server_socket_thread_pool_t *pool) {
-    pthread_mutex_lock (&pool->mutex);
-    
-    http_socket_t *current = pool->start;
-    while (current != NULL) {
-        close (current->fd);
-        free (current);
+/// Creates new HTTP server socket pool.
+http_server_socket_pool_t *__http_server_socket_pool_create (size_t max_socket_count) {    
+    // Allocates the memory for the pool base structure.
+    http_server_socket_pool_t *pool = (http_server_socket_pool_t *) calloc (1, sizeof (http_server_socket_pool_t));
+    if (pool == NULL)
+        return NULL;
 
-        current = current->next;
+    // Allocates the memory for the poll fds.
+    struct pollfd *fds = (struct pollfd *) calloc (max_socket_count, sizeof (struct pollfd));
+    if (fds == NULL) {
+        free (pool);
+        return NULL;
     }
 
-    pool->start = pool->end = NULL;
-    pool->socket_count = 0;
+    // Sets the pool variables.
+    pool->fds = fds;
+    pool->max_socket_count = max_socket_count;
 
-    pthread_mutex_unlock (&pool->mutex);
+    return pool;
 }
 
+/// Initializes HTTP server socket pool.
+int32_t __http_server_socket_pool_init (http_server_socket_pool_t *pool) {
+    // Initializes the mutex.
+    if (pthread_mutex_init (&pool->mutex, NULL) != 0) {
+        perror ("pthread_mutex_init () failed");
+        return -1;
+    }
+
+    return 0;
+}
+
+/// Starts HTTP server socket pool.
+int32_t __http_server_socket_pool_start (http_server_socket_t *sock, http_server_socket_pool_t *pool) {
+    // Creates the thead argument, containing socket and pool.
+    __http_socket_pool_method__arg *arg = (__http_socket_pool_method__arg *) malloc (sizeof (__http_socket_pool_method__arg));
+    if (arg == NULL)
+        return -1;
+    
+    arg->pool = pool;
+    arg->sock = sock;
+    
+    // Starts the threada.
+    if (pthread_create (&pool->thread, NULL, __http_socket_pool_method, (void *) arg) != 0) {
+        perror ("pthread_create () failed");
+        return -2;
+    }
+
+    return 0;
+}
+
+/// Stops HTTP server socket pool.
+int32_t __http_server_socket_pool_stop (http_server_socket_pool_t *pool) {
+    // Sets the socket pool shutdown flag.
+    pthread_mutex_lock (&pool->mutex);
+    pool->flags |= HTTP_SERVER_SOCKET_POOL_FLAG_SHUTDOWN;
+    pthread_mutex_unlock (&pool->mutex);
+
+    // Joins the socket pool with the current thread, waiting for it to shutdown.
+    if (pthread_join (pool->thread, NULL) != 0) {
+        perror ("pthread_join () failed");
+        return -1;
+    }
+    
+    // Loops over all the sockets, closes the connections and removes them from
+    //  the list.
+    http_socket_t *socket = pool->start;
+    while (socket != NULL) {
+        // Closes the socket, and unregisters it from the list.
+        close (socket->fd);
+
+        // Gets the next socket, unregisters the file descriptor
+        //  and goes to the next one.
+        http_socket_t *next = socket->next; // May be NULL!
+        __http_socket_pool_unregister__by_fd (pool, socket->fd);
+        socket = next;
+    }
+
+    return 0;
+}
+
+/// Frees HTTP server socket pool.
+void __http_server_socket_pool_free (http_server_socket_pool_t **pool) {
+    // Frees the fds struct array.
+    free ((*pool)->fds);
+
+    // Frees the structure, and sets it to zero.
+    free (*pool);
+    *pool = NULL;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
 /// Gets called when an socket can be written to.
-int32_t __http_socket_pool__on_writable (http_server_socket_t *sock, http_server_socket_thread_pool_t *pool, http_socket_t *socket) {
+int32_t __http_socket_pool__on_writable (http_server_socket_t *sock, http_server_socket_pool_t *pool, http_socket_t *socket) {
     return 0;
 }
 
 /// Gets called when an socket can be read from.
-int32_t __http_socket_pool__on_readable (http_server_socket_t *sock, http_server_socket_thread_pool_t *pool, http_socket_t *socket) {
+int32_t __http_socket_pool__on_readable (http_server_socket_t *sock, http_server_socket_pool_t *pool, http_socket_t *socket) {
     char buffer [1024];
 
     int rc = recv (socket->fd, buffer, sizeof (buffer), 1024);
@@ -198,11 +263,15 @@ int32_t __http_socket_pool__on_readable (http_server_socket_t *sock, http_server
         break;
     }
 
+    for (int i = 0; i < rc; ++i) {
+        printf ("%c", buffer[i]);
+    }
+
     return 0;
 }
 
 /// Registers an socket to specified pool, only can be called if pool empty.
-void __http_socket_pool_register_socket__empty_pool (http_server_socket_thread_pool_t *pool, http_socket_t *socket) {
+void __http_socket_pool_register_socket__empty_pool (http_server_socket_pool_t *pool, http_socket_t *socket) {
     // Make the start and end the specified socket.
     pool->start = socket;
     pool->end = socket;
@@ -216,7 +285,7 @@ void __http_socket_pool_register_socket__empty_pool (http_server_socket_thread_p
 }
 
 /// Registers an socket to the specified pool, only can be called if pool not empty.
-void __http_socket_pool_register_socket__not_empty_pool (http_server_socket_thread_pool_t *pool, http_socket_t *socket) {
+void __http_socket_pool_register_socket__not_empty_pool (http_server_socket_pool_t *pool, http_socket_t *socket) {
     // Sets the previous value of the new socket to the current end.
     socket->prev = pool->end;
     socket->prev->next = socket;
@@ -230,20 +299,15 @@ void __http_socket_pool_register_socket__not_empty_pool (http_server_socket_thre
 }
 
 /// Registers an socket to the specified pool
-void __http_socket_pool_register_socket (http_server_socket_thread_pool_t *pool, http_socket_t *socket) {
-    pthread_mutex_lock (&pool->mutex);
-
-    // Checks which insertion method we should use.
+void __http_socket_pool_register_socket (http_server_socket_pool_t *pool, http_socket_t *socket) {
     if (pool->socket_count == 0)
         __http_socket_pool_register_socket__empty_pool (pool, socket);
     else
         __http_socket_pool_register_socket__not_empty_pool (pool, socket);
-
-    pthread_mutex_unlock (&pool->mutex);
 }
 
 /// Unregisters an socket with the specified fd.
-void __http_socket_pool_unregister__by_fd (http_server_socket_thread_pool_t *pool, int32_t fd) {
+void __http_socket_pool_unregister__by_fd (http_server_socket_pool_t *pool, int32_t fd) {
     http_socket_t *socket = __http_socket_pool__get_socket_by_fd (pool, fd);
     if (socket == NULL) {
         fprintf (stderr, "Attempting to unregister socket of value NULL\r\n");
@@ -269,7 +333,7 @@ void __http_socket_pool_unregister__by_fd (http_server_socket_thread_pool_t *poo
 
 
 /// Gets an socket by fd.
-http_socket_t *__http_socket_pool__get_socket_by_fd (http_server_socket_thread_pool_t *pool, int32_t fd) {
+http_socket_t *__http_socket_pool__get_socket_by_fd (http_server_socket_pool_t *pool, int32_t fd) {
     http_socket_t *res = NULL;
 
     http_socket_t *current = pool->start;
@@ -323,7 +387,7 @@ void *__http_socket_pool_method (void *arg) {
         int poll_rc;
 
     poll_retry:
-        poll_rc = poll (poll_fds, args->pool->socket_count, 10 * 1000);
+        poll_rc = poll (poll_fds, args->pool->socket_count, 300);
         if (poll_rc == -1) {
             // Checks if the errno tells us to try again.
             if (errno == EAGAIN)
@@ -373,7 +437,8 @@ void *__http_socket_pool_method (void *arg) {
         }
 
         // Checks if we need to shut down acceptor thread.
-        if (args->sock->flags & HTTP_SERVER_SOCKET_THREADS_SHUTDOWN_FLAG) {
+        if (args->pool->flags & HTTP_SERVER_SOCKET_POOL_FLAG_SHUTDOWN) {
+            __http_server_socket_log (args->sock, "Pool received shutdown signal ...");
             break;
         }
     }
@@ -385,21 +450,8 @@ void *__http_socket_pool_method (void *arg) {
 
 /// Starts the thread pools.
 int32_t http_server_start_thread_pools (http_server_socket_t *sock) {
-    // Loops over all the pools, and starts them.
     for (size_t i = 0; i < sock->thread_pool_count; ++i) {
-        http_server_socket_thread_pool_t *pool = &sock->pools[i];
-
-        // Creates the thread, and if this goes wrong, we will print the error message
-        //  and return error code.
-        __http_socket_pool_method__arg *args = (__http_socket_pool_method__arg *) malloc (sizeof (__http_socket_pool_method__arg));
-        args->sock = sock;
-        args->pool = pool;
-        if (pthread_create (&pool->thread, NULL, __http_socket_pool_method, args) < 0) {
-            perror ("pthread_create () failed");
-            return -1;
-        }
-
-        // Prints that we've created the socket pool.
+        __http_server_socket_pool_start (sock, sock->pools[i]);
         __http_server_socket_log (sock, "Socket pool %lu of %lu created and running.", i, sock->thread_pool_count);
     }
 
@@ -409,6 +461,7 @@ int32_t http_server_start_thread_pools (http_server_socket_t *sock) {
 ///////////////////////////////////////////////////////////////////////////////
 // HTTP Server Socket Acceptor
 ///////////////////////////////////////////////////////////////////////////////
+
 
 /// Accepts an client socket, returns NULL if not possible.
 http_socket_t *__http_server__accept_socket (http_server_socket_t *sock) {
@@ -452,13 +505,19 @@ http_socket_t *__http_server__accept_socket (http_server_socket_t *sock) {
 
 /// Registers an accepted socket
 void __http_server_acceptor__register_socket (http_server_socket_t *sock, http_socket_t *socket) {
-    pthread_mutex_lock (&sock->struct_mutex);
-    sock->thread_pool_register_next = (sock->thread_pool_register_next + 1) % (sock->thread_pool_count);
-    http_server_socket_thread_pool_t *pool = &(sock->pools[sock->thread_pool_register_next]);
-    pthread_mutex_unlock (&sock->struct_mutex);
+    // Locks the mutex.
+    pthread_mutex_lock (&sock->acceptor_mutex);
 
-    __http_server_socket_log (sock, "Registering socket to pool %lu", sock->thread_pool_register_next);
+    // Determines which pool to register the socket to, after which we get it and register
+    //  the scket to it.
+    sock->thread_pool_register_next = (sock->thread_pool_register_next + 1) % (sock->thread_pool_count);
+    http_server_socket_pool_t *pool = sock->pools[sock->thread_pool_register_next];
     __http_socket_pool_register_socket (pool, socket);
+
+    // Unlocks the mutex and logs that we've registered the socket.
+    pthread_mutex_unlock (&sock->acceptor_mutex);
+    __http_server_socket_log (sock, "Registering socket to pool %lu", sock->thread_pool_register_next);
+
 }
 
 /// Accepts incomming connections.
@@ -470,15 +529,10 @@ void *__http_server_acceptor (void *arg) {
         http_socket_t *socket = NULL;
         if ((socket = __http_server__accept_socket (sock)) != NULL) {
             char *addr = __http_helper__thread_safe__inet_ntoa (socket->address.sin_addr);
-            __http_server_socket_log (sock, "Accepted %s:%u\r\n", addr, ntohs (socket->address.sin_port));
+            __http_server_socket_log (sock, "Accepted %s:%u", addr, ntohs (socket->address.sin_port));
             free (addr);
 
             __http_server_acceptor__register_socket (sock, socket);
-        }
-
-        // Checks if we need to shut down acceptor thread.
-        if (sock->flags & HTTP_SERVER_SOCKET_THREADS_SHUTDOWN_FLAG) {
-            break;
         }
     }
 
@@ -504,13 +558,24 @@ int32_t http_server_start_acceptor (http_server_socket_t *sock, bool in_new_thre
     }
 
     // Creates the new acceptor thread, and detaches it from the current thread.
-    if (pthread_create (&sock->acceptor_thread_id, NULL, __http_server_acceptor, (void *) sock) < 0) {
+    if (pthread_create (&sock->acceptor_thread, NULL, __http_server_acceptor, (void *) sock) < 0) {
         perror ("pthread_create () failed");
         return -2;
     }
 
     // Prints that the acceptor has started.
     __http_server_socket_log (sock, "Acceptor started.");
+
+    return 0;
+}
+
+/// Stops the acceptor.
+int32_t __http_server_socket_stop_acceptor (http_server_socket_t *sock) {
+    // Joints the thread, so we basically wait for it to quit.
+    if (pthread_cancel (sock->acceptor_thread) != 0) {
+        perror ("pthread_join () failed");
+        return -1;
+    }
 
     return 0;
 }

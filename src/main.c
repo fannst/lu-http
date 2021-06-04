@@ -10,8 +10,9 @@ int main (int argc, char **argv) {
 //     http_response_prepare_default_headers ();
     http_helpers_init ();
 
-    http_server_socket_t *sock = NULL;
-    http_server_socket_new (&sock, 1);
+    http_server_socket_t *sock = http_server_socket_create(4, 128);
+
+    http_server_socket_init (sock);
     http_server_socket_configure (sock, 8080, "0.0.0.0", 20);
     http_server_socket_bind (sock);
     http_server_socket_listen (sock);
@@ -19,8 +20,11 @@ int main (int argc, char **argv) {
     http_server_start_thread_pools (sock);
 
     printf ("Press ENTER to shut down\r\n");
-    getchar();
+    getchar();\
 
+    printf ("Shutting dow\r\n");
+
+    http_server_socket_stop (sock);
     http_server_socket_free (&sock);
 //
 //     http_response_t resp = {
