@@ -52,6 +52,18 @@ __http_line_buffer__line_t *http_line_buffer_line_create_from_string (const char
     return res;
 }
 
+/// Creates a line from specified size and string.
+__http_line_buffer__line_t *http_line_buffer_line_create (char *string, size_t len) {
+    __http_line_buffer__line_t *res = (__http_line_buffer__line_t *) calloc (1, sizeof (__http_line_buffer__line_t));
+    if (res == NULL)
+        return NULL;
+
+    res->string = string;
+    res->total = len;
+
+    return res;
+}
+
 /// Appends one line to the http line buffer.
 int32_t http_line_buffer_append (__http_line_buffer_t *buffer, __http_line_buffer__line_t *line) {
     // Checks if the buffer was empty or not, if it's empty
@@ -81,18 +93,24 @@ __http_line_buffer__line_t *http_line_buffer_get_latest_line (__http_line_buffer
 int32_t http_line_buffer_free_latest_line (__http_line_buffer_t *buffer) {
     if (buffer->line_count == 0)
         return -1; 
+    else if (buffer->line_count == 1) {
+        free (buffer->end->string);
+        free (buffer->end);
 
-    __http_line_buffer__line_t *end = buffer->end;
-
-    if (end->prev != NULL) {
-        end->prev->next = NULL;
-        buffer->end = end->prev;
+        buffer->end = buffer->start = NULL;
     } else {
-        buffer->end = NULL;
+        buffer->end->prev->next = NULL;
+        
+        __http_line_buffer__line_t *prev = buffer->end->prev;
+
+        free (buffer->end->string);
+        free (buffer->end);
+
+        buffer->end = prev;
     }
 
-    free (end->string);
-    free (end);
+    // Decrements the number of lines.
+    --buffer->line_count;
 
     return 0;
 }

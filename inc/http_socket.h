@@ -35,6 +35,7 @@
 
 #include "http_helpers.h"
 #include "http_line_buffer.h"
+#include "http_request.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 // Flags and shit
@@ -43,6 +44,8 @@
 #define HTTP_SERVER_SOCKET_ACCEPTOR_THREAD_CREATED          (1 << 1)
 
 #define HTTP_SERVER_SOCKET_POOL_FLAG_SHUTDOWN               (1 << 0)
+
+#define HTTP_SOCKET_RECV_BUFFER_SIZE                        1024
 
 ///////////////////////////////////////////////////////////////////////////////
 // Data Types
@@ -56,7 +59,10 @@ struct http_socket {
 
     struct http_socket *next, *prev;
 
-    __http_line_buffer_t *line_buffer;
+    __http_line_buffer_t *read_line_buffer, *write_line_buffer;
+
+    size_t recv_buffer_level;
+    char *recv_buffer;
 };
 
 typedef struct http_socket http_socket_t;

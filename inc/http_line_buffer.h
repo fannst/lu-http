@@ -60,6 +60,9 @@ void http_line_buffer_free (__http_line_buffer_t **buffer);
 /// Creates a new line.
 __http_line_buffer__line_t *http_line_buffer_line_create_from_string (const char *string);
 
+/// Creates a line from specified size and string.
+__http_line_buffer__line_t *http_line_buffer_line_create (char *string, size_t len);
+
 /// Appends one line to the http line buffer.
 int32_t http_line_buffer_append (__http_line_buffer_t *buffer, __http_line_buffer__line_t *line);
 

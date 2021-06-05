@@ -261,14 +261,28 @@ void __http_server_socket_pool_free (http_server_socket_pool_t **pool) {
 
 /// Gets called when an socket can be written to.
 int32_t __http_socket_pool__on_writable (http_server_socket_t *sock, http_server_socket_pool_t *pool, http_socket_t *socket) {
+    while (socket->write_line_buffer->line_count > 0) {
+        __http_line_buffer__line_t *line = http_line_buffer_get_latest_line (socket->write_line_buffer);
+
+        int32_t rc = write (socket->fd, &line->string[line->written], line->total - line->written);
+        printf ("%lu\r\n", line->total);
+        if (rc == -1) {
+            perror ("write () failed");
+            return -1;
+        } else if (rc == (int32_t) line->total) {
+            http_line_buffer_free_latest_line (socket->write_line_buffer);
+        } else {
+            line->written = (size_t) rc;
+            break;
+        }
+    }
+
     return 0;
 }
 
 /// Gets called when an socket can be read from.
 int32_t __http_socket_pool__on_readable (http_server_socket_t *sock, http_server_socket_pool_t *pool, http_socket_t *socket) {
-    char buffer [1024];
-
-    int rc = recv (socket->fd, buffer, sizeof (buffer), 1024);
+    int rc = recv (socket->fd, &socket->recv_buffer[socket->recv_buffer_level], HTTP_SOCKET_RECV_BUFFER_SIZE - socket->recv_buffer_level, 0);
     switch (rc) {
     case 0:
         return -1;
@@ -279,11 +293,45 @@ int32_t __http_socket_pool__on_readable (http_server_socket_t *sock, http_server
         break;
     }
 
-    char *save_ptr = NULL, *tok = strtok_r (buffer, "\r\n", &save_ptr);
-    while (tok != NULL) {
-        http_line_buffer_append (socket->line_buffer, http_line_buffer_line_create_from_string (tok));
-        tok = strtok_r (NULL, "\r\n", &save_ptr);
+    socket->recv_buffer_level += (size_t) rc;
+
+    // Reads all the lines from the buffer.
+    size_t offset = 0;
+    for (;;) {
+        char *start = &socket->recv_buffer[offset];
+        char *lf = memchr ((const void *) start, '\n', socket->recv_buffer_level - offset);
+        if (lf == NULL) {
+            break;
+        }
+
+        size_t line_len = lf - start;
+        if (line_len > 1) {
+            lf [lf[-1] == '\r' ? -1 : 0] = '\0';
+            http_line_buffer_append (socket->read_line_buffer, http_line_buffer_line_create_from_string (start));
+        } else {
+            http_line_buffer_append (socket->read_line_buffer, http_line_buffer_line_create_from_string (""));
+        }
+
+        offset += line_len + 1;
     }
+
+    // Moves the buffer so we can read more in the future.
+    memmove (socket->recv_buffer, &socket->recv_buffer[offset], socket->recv_buffer_level - offset);
+    socket->recv_buffer_level -= offset;
+    
+    http_request_t req;
+    req.headers = http_headers_new ();
+    req.state = HTTP_REQUEST_STATE_RECEIVING_TYPE;
+    while (socket->read_line_buffer->line_count > 0) {
+        __http_line_buffer__line_t *line = http_line_buffer_get_latest_line (socket->read_line_buffer);
+        http_request_update (&req, (char *) line->string);
+        http_line_buffer_free_latest_line (socket->read_line_buffer);
+    }
+
+    http_request_print (&req);
+
+    http_headers_free (&req.headers);
+    free (req.url);
 
     return 0;
 }
@@ -346,7 +394,10 @@ void __http_socket_pool_unregister__by_fd (http_server_socket_pool_t *pool, int3
 
     --pool->socket_count;
     
-    http_line_buffer_free (&socket->line_buffer);
+    http_line_buffer_free (&socket->read_line_buffer);
+    http_line_buffer_free (&socket->write_line_buffer);
+
+    free (socket->recv_buffer);
     free (socket);
 }
 
@@ -513,10 +564,33 @@ http_socket_t *__http_server__accept_socket (http_server_socket_t *sock) {
         return NULL;
     }
 
-    // Create the line buffer.
-    socket->line_buffer = http_line_buffer_create ();
-    if (socket->line_buffer == NULL) {
+    // Create the read line buffer.
+    socket->read_line_buffer = http_line_buffer_create ();
+    if (socket->read_line_buffer == NULL) {
         close (fd);
+        free (socket);
+        return NULL;
+    }
+
+    // Create the write line buffer.
+    socket->write_line_buffer = http_line_buffer_create ();
+    if (socket->write_line_buffer == NULL) {
+        close (fd);
+
+        http_line_buffer_free (&socket->read_line_buffer);
+
+        free (socket);
+        return NULL;
+    }
+
+    // Creates the line buffer.
+    socket->recv_buffer = (char *) malloc (HTTP_SOCKET_RECV_BUFFER_SIZE);
+    if (socket->recv_buffer == NULL) {
+        close (fd);
+
+        http_line_buffer_free (&socket->read_line_buffer);
+        http_line_buffer_free (&socket->write_line_buffer);
+
         free (socket);
         return NULL;
     }
