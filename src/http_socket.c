@@ -1,3 +1,19 @@
+/*
+    Copyright 2021 Luke A.C.A. Rieff
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+*/
+
 #include "http_socket.h"
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -263,8 +279,10 @@ int32_t __http_socket_pool__on_readable (http_server_socket_t *sock, http_server
         break;
     }
 
-    for (int i = 0; i < rc; ++i) {
-        printf ("%c", buffer[i]);
+    char *save_ptr = NULL, *tok = strtok_r (buffer, "\r\n", &save_ptr);
+    while (tok != NULL) {
+        http_line_buffer_append (socket->line_buffer, http_line_buffer_line_create_from_string (tok));
+        tok = strtok_r (NULL, "\r\n", &save_ptr);
     }
 
     return 0;
@@ -327,7 +345,8 @@ void __http_socket_pool_unregister__by_fd (http_server_socket_pool_t *pool, int3
         pool->end = socket->prev;
 
     --pool->socket_count;
-        
+    
+    http_line_buffer_free (&socket->line_buffer);
     free (socket);
 }
 
@@ -387,7 +406,7 @@ void *__http_socket_pool_method (void *arg) {
         int poll_rc;
 
     poll_retry:
-        poll_rc = poll (poll_fds, args->pool->socket_count, 300);
+        poll_rc = poll (poll_fds, args->pool->socket_count, 50);
         if (poll_rc == -1) {
             // Checks if the errno tells us to try again.
             if (errno == EAGAIN)
@@ -494,6 +513,14 @@ http_socket_t *__http_server__accept_socket (http_server_socket_t *sock) {
         return NULL;
     }
 
+    // Create the line buffer.
+    socket->line_buffer = http_line_buffer_create ();
+    if (socket->line_buffer == NULL) {
+        close (fd);
+        free (socket);
+        return NULL;
+    }
+
     // Configures the http socket.
     socket->address = client_addr;
     socket->fd = fd;
@@ -576,6 +603,7 @@ int32_t __http_server_socket_stop_acceptor (http_server_socket_t *sock) {
         perror ("pthread_join () failed");
         return -1;
     }
+
 
     return 0;
 }
