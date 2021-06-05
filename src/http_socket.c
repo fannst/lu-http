@@ -440,8 +440,15 @@ void *__http_socket_pool_method (void *arg) {
                 if (socket == NULL) {
                     fprintf (stderr, "socket->next == NULL, this should not happen normally!\r\n");
                 }
-                
-                poll_fds[i].events = POLLIN | POLLOUT | POLLERR | POLLHUP;
+
+                // Adds the default events we're interested in.
+                poll_fds[i].events = POLLIN | POLLERR | POLLHUP;
+
+                // Checks if we've got anything left to write, if so
+                //  add the pollout event.
+                if (socket->write_line_buffer->line_count > 0)
+                    poll_fds[i].events |= POLLOUT;
+
                 poll_fds[i].fd = socket->fd;
                 
                 socket = socket->next;
