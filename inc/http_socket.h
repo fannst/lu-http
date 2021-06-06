@@ -32,6 +32,7 @@
 #include <stdarg.h>
 #include <sys/ioctl.h>
 #include <sys/poll.h>
+#include <malloc.h>
 
 #include "http_request.h"
 #include "http_helpers.h"

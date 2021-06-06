@@ -55,7 +55,12 @@ http_socket_t *http_socket_new (void) {
     //  free and return NULL.
     res->request = http_request_create ();
     if (res->request == NULL) {
+        http_line_buffer_free (&res->read_line_buffer);
+        http_line_buffer_free (&res->write_line_buffer);
+
+        free (res->recv_buffer);
         free (res);
+        
         return NULL;
     }
 

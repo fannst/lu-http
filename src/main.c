@@ -20,13 +20,23 @@ void print_header (const char *memory, void *u) {
     printf ("%s", memory);
 }
 
+void *recurring_thread (void *u) {
+    for (;;) {
+        malloc_trim (1024);
+        usleep (500 * 1000);
+    }
+}
+
 int main (int argc, char **argv) {
     srand (time (NULL));
+
+    pthread_t thread;
+    pthread_create (&thread, NULL, recurring_thread, NULL);
 
 //     http_response_prepare_default_headers ();
     http_helpers_init ();
 
-    http_server_socket_t *sock = http_server_socket_create(4, 1024);
+    http_server_socket_t *sock = http_server_socket_create(8, 1024);
 
     http_server_socket_init (sock);
     http_server_socket_configure (sock, 8080, "0.0.0.0", 20);
@@ -36,9 +46,10 @@ int main (int argc, char **argv) {
     http_server_start_thread_pools (sock);
 
     printf ("Press ENTER to shut down\r\n");
-    getchar();\
+    getchar();
 
-    printf ("Shutting dow\r\n");
+    pthread_cancel (thread);
+    pthread_join (thread, NULL);
 
     http_server_socket_stop (sock);
     http_server_socket_free (&sock);
