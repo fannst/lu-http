@@ -44,6 +44,8 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "http_common.h"
+
 ///////////////////////////////////////////////////////////////////////////////
 // Data Types
 ///////////////////////////////////////////////////////////////////////////////
@@ -115,6 +117,9 @@ int32_t http_headers_free (http_headers_t **headers);
 
 /// Adds all headers from structure to another one.
 int32_t http_headers_add_all (http_headers_t *target, http_headers_t *from);
+
+/// Finds an HTTP header by key.
+http_header_t *http_headers_find_by_key (http_headers_t *target, const char *key);
 
 ///////////////////////////////////////////////////////////////////////////////
 // To String Methods

@@ -17,18 +17,21 @@
 #ifndef _HTTP_REQUEST_H
 #define _HTTP_REQUEST_H
 
+#define HTTP_REQUEST_FLAG_EXPECTING_BODY        (1 << 0)
+
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <string.h>
 
-#include "http_socket.h"
 #include "http_header.h"
+#include "http_content_type.h"
 #include "http_line_buffer.h"
 
 typedef enum {
-    HTTP_REQUEST_STATE_RECEIVING_TYPE = 0,
-    HTTP_REQUEST_STATE_RECEIVING_HEADERS,
-    HTTP_REQUEST_STATE_RECEIVING_BODY
+    HTTP_REQUEST_STATE_RECEIVING_TYPE = 0,          // The request type, path and HTTP version.
+    HTTP_REQUEST_STATE_RECEIVING_HEADERS,           // The request headers.
+    HTTP_REQUEST_STATE_RECEIVING_BODY,              // The possible body.
+    HTTP_REQUEST_STATE_DONE                         // Preparing response ...
 } http_request_state_t;
 
 typedef enum {
@@ -47,9 +50,12 @@ typedef enum {
 
 typedef struct {
     http_request_state_t    state;
+    uint32_t                flags;
 
     http_method_t           method;
     http_version_t          version;
+    http_content_type_t     content_type;
+    size_t                  content_length;
 
     http_headers_t         *headers;
 
@@ -57,6 +63,12 @@ typedef struct {
 
     __http_line_buffer_t   *body;
 } http_request_t;
+
+/// Creates an new HTTP request.
+http_request_t *http_request_create (void);
+
+/// Frees an HTTP request.
+int32_t http_request_free (http_request_t **req);
 
 /// Prints HTTP request info.
 void http_request_print (http_request_t *request);

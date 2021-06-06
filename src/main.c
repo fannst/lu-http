@@ -26,7 +26,7 @@ int main (int argc, char **argv) {
 //     http_response_prepare_default_headers ();
     http_helpers_init ();
 
-    http_server_socket_t *sock = http_server_socket_create(4, 128);
+    http_server_socket_t *sock = http_server_socket_create(4, 1024);
 
     http_server_socket_init (sock);
     http_server_socket_configure (sock, 8080, "0.0.0.0", 20);

@@ -21,11 +21,19 @@
 #include <string.h>
 
 typedef enum {
-    HTTP_CONTENT_TYPE_TEXT_PLAIN,
-    HTTP_CONTENT_TYPE_TEXT_HTML
+    HTTP_CONTENT_TYPE_TEXT_PLAIN = 0,
+    HTTP_CONTENT_TYPE_TEXT_HTML,
+    HTTP_CONTENT_TYPE_TEXT_CSS,
+    HTTP_CONTENT_TYPE_TEXT_JS,
+    HTTP_CONTENT_TYPE_APPLICATION_X_WWW_FORM_URLENCODED,
+    HTTP_CONTENT_TYPE_APPLICATION_JSON,
+    HTTP_CONTENT_TYPE_UNKNOWN
 } http_content_type_t;
 
 /// Gets the string version of an HTTP content type.
 const char *http_content_type_to_string (http_content_type_t type);
+
+/// Gets an HTTP content type from string.
+http_content_type_t http_content_type_from_string (const char *str);
 
 #endif

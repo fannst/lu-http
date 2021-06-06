@@ -33,9 +33,9 @@
 #include <sys/ioctl.h>
 #include <sys/poll.h>
 
+#include "http_request.h"
 #include "http_helpers.h"
 #include "http_line_buffer.h"
-#include "http_request.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 // Flags and shit
@@ -63,6 +63,8 @@ struct http_socket {
 
     size_t recv_buffer_level;
     char *recv_buffer;
+
+    http_request_t *request;
 };
 
 typedef struct http_socket http_socket_t;
@@ -98,6 +100,16 @@ typedef struct {
     http_server_socket_t *sock;
     http_server_socket_pool_t *pool;
 } __http_socket_pool_method__arg;
+
+///////////////////////////////////////////////////////////////////////////////
+// HTTP Socket
+///////////////////////////////////////////////////////////////////////////////
+
+/// Creates new HTTP socket instance.
+http_socket_t *http_socket_new (void);
+
+/// Frees HTTP socket instance.
+int32_t http_socket_free (http_socket_t **socket);
 
 ///////////////////////////////////////////////////////////////////////////////
 // HTTP Server Socket

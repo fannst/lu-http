@@ -15,7 +15,7 @@ void http_line_buffer_free (__http_line_buffer_t **buffer) {
     __http_line_buffer__line_t *line = (*buffer)->start;
     while (line != NULL) {
         // Stores the next line as temp, and frees it.
-        __http_line_buffer__line_t *next = line->next;   
+        __http_line_buffer__line_t *next = line->next;
         free (line->string);
         free (line);
 

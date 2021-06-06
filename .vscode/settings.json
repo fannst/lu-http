@@ -9,6 +9,7 @@
         "**/*.elf": true
     },
     "files.associations": {
-        "main.h": "c"
+        "main.h": "c",
+        "http_common.h": "c"
     }
 }

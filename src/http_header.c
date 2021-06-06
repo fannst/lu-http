@@ -235,7 +235,7 @@ int32_t http_headers_free (http_headers_t **headers) {
 
 /// Adds all headers from structure to another one.
 int32_t http_headers_add_all (http_headers_t *target, http_headers_t *from) {
-     // Creates the header walk context.
+    // Creates the header walk context.
     http_headers_walk_ctx_t *ctx = http_headers_walk_ctx_new (from, HTTP_HEADERS_WALK_CTX_FLAG_FORWARD);
     if (ctx == NULL)
         return -1;
@@ -250,6 +250,29 @@ int32_t http_headers_add_all (http_headers_t *target, http_headers_t *from) {
     http_header_walk_ctx_free (&ctx);
 
     return 0;
+}
+
+/// Finds an HTTP header by key.
+http_header_t *http_headers_find_by_key (http_headers_t *target, const char *key) {
+     // Creates the header walk context.
+    http_headers_walk_ctx_t *ctx = http_headers_walk_ctx_new (target, HTTP_HEADERS_WALK_CTX_FLAG_FORWARD);
+    if (ctx == NULL)
+        return NULL;
+    
+    // Loops over all the headers, and checks if we've found the header, if so
+    //  free the walk context, and return.
+    http_header_t *header;
+    while ((header = __http_headers_walk_next (ctx)) != NULL) {
+        if (strcicmp (header->key, key)) {
+            http_header_walk_ctx_free (&ctx);
+            return header;
+        }
+    }
+
+    // Frees the header walk context.
+    http_header_walk_ctx_free (&ctx);
+
+    return NULL;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

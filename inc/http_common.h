@@ -18,11 +18,16 @@
 #define _HTTP_COMMON_H
 
 #include <stdlib.h>
+#include <stdbool.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <errno.h>
 #include <string.h>
 
 /// Prints an error code with custom message.
 void errc_print (const char *message);
+
+/// Compares two strings case insensitive.
+bool strcicmp (const char *a, const char *b);
 
 #endif

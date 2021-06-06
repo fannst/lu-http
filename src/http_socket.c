@@ -17,6 +17,72 @@
 #include "http_socket.h"
 
 ///////////////////////////////////////////////////////////////////////////////
+// HTTP Socket
+///////////////////////////////////////////////////////////////////////////////
+
+/// Creates new HTTP socket instance.
+http_socket_t *http_socket_new (void) {
+    // Allocates the memory for the http socket.
+    http_socket_t *res = (http_socket_t *) calloc (1, sizeof (http_socket_t));
+    if (res == NULL)
+        return NULL;
+
+    // Allocates the receive buffer.
+    res->recv_buffer = (char *) malloc (HTTP_SOCKET_RECV_BUFFER_SIZE);
+    if (res->recv_buffer == NULL) {
+        free (res);
+        return NULL;
+    }
+
+    // Allocates the memory for the line buffers.
+    res->read_line_buffer = http_line_buffer_create ();
+    if (res->read_line_buffer == NULL) {
+        free (res->recv_buffer);
+        free (res);
+        return NULL;
+    }
+
+    res->write_line_buffer = http_line_buffer_create ();
+    if (res->write_line_buffer == NULL) {
+        http_line_buffer_free (&res->read_line_buffer);
+
+        free (res->recv_buffer);
+        free (res);
+        return NULL;
+    }
+
+    // Creates the HTTP request instance, if this fails
+    //  free and return NULL.
+    res->request = http_request_create ();
+    if (res->request == NULL) {
+        free (res);
+        return NULL;
+    }
+
+    return res;
+}
+
+/// Frees HTTP socket instance.
+int32_t http_socket_free (http_socket_t **socket) {
+    // Frees the HTTP request.
+    if (http_request_free (&((*socket)->request)) != 0)
+        return -1;
+
+    // Frees the line buffers.
+    http_line_buffer_free (&((*socket)->read_line_buffer));
+    http_line_buffer_free (&((*socket)->write_line_buffer));
+    
+    // Frees the receive buffer.
+    free ((*socket)->recv_buffer);
+    
+    // Frees the socket structure.
+    free (*socket);
+    *socket = NULL;
+
+    return 0;
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // HTTP Server Socket
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -182,6 +248,7 @@ http_server_socket_pool_t *__http_server_socket_pool_create (size_t max_socket_c
 
     // Sets the pool variables.
     pool->fds = fds;
+    pool->socket_count = 0;
     pool->max_socket_count = max_socket_count;
 
     return pool;
@@ -318,20 +385,6 @@ int32_t __http_socket_pool__on_readable (http_server_socket_t *sock, http_server
     // Moves the buffer so we can read more in the future.
     memmove (socket->recv_buffer, &socket->recv_buffer[offset], socket->recv_buffer_level - offset);
     socket->recv_buffer_level -= offset;
-    
-    http_request_t req;
-    req.headers = http_headers_new ();
-    req.state = HTTP_REQUEST_STATE_RECEIVING_TYPE;
-    while (socket->read_line_buffer->line_count > 0) {
-        __http_line_buffer__line_t *line = http_line_buffer_get_latest_line (socket->read_line_buffer);
-        http_request_update (&req, (char *) line->string);
-        http_line_buffer_free_latest_line (socket->read_line_buffer);
-    }
-
-    http_request_print (&req);
-
-    http_headers_free (&req.headers);
-    free (req.url);
 
     return 0;
 }
@@ -393,12 +446,8 @@ void __http_socket_pool_unregister__by_fd (http_server_socket_pool_t *pool, int3
         pool->end = socket->prev;
 
     --pool->socket_count;
-    
-    http_line_buffer_free (&socket->read_line_buffer);
-    http_line_buffer_free (&socket->write_line_buffer);
 
-    free (socket->recv_buffer);
-    free (socket);
+    http_socket_free (&socket);
 }
 
 
@@ -421,7 +470,6 @@ http_socket_t *__http_socket_pool__get_socket_by_fd (http_server_socket_pool_t *
 
 /// Event loop for HTTP server pool process.
 void *__http_socket_pool_method (void *arg) {
-    struct pollfd poll_fds[1024];
     __http_socket_pool_method__arg *args = (__http_socket_pool_method__arg *) arg;
 
     // Stays in loop as long as shutdown is not rqeuested.
@@ -442,14 +490,14 @@ void *__http_socket_pool_method (void *arg) {
                 }
 
                 // Adds the default events we're interested in.
-                poll_fds[i].events = POLLIN | POLLERR | POLLHUP;
+                args->pool->fds[i].events = POLLIN | POLLERR | POLLHUP;
 
                 // Checks if we've got anything left to write, if so
                 //  add the pollout event.
                 if (socket->write_line_buffer->line_count > 0)
-                    poll_fds[i].events |= POLLOUT;
+                    args->pool->fds[i].events |= POLLOUT;
 
-                poll_fds[i].fd = socket->fd;
+                args->pool->fds[i].fd = socket->fd;
                 
                 socket = socket->next;
             }
@@ -464,7 +512,7 @@ void *__http_socket_pool_method (void *arg) {
         int poll_rc;
 
     poll_retry:
-        poll_rc = poll (poll_fds, args->pool->socket_count, 50);
+        poll_rc = poll (args->pool->fds, args->pool->socket_count, 50);
         if (poll_rc == -1) {
             // Checks if the errno tells us to try again.
             if (errno == EAGAIN)
@@ -480,11 +528,11 @@ void *__http_socket_pool_method (void *arg) {
         //  list.
 
         for (int32_t i = 0; i < poll_rc; ++i) {
-            int16_t revents = poll_fds[i].revents;
+            int16_t revents = args->pool->fds[i].revents;
             bool should_close = false;
 
             pthread_mutex_lock (&args->pool->mutex);
-            http_socket_t *socket = __http_socket_pool__get_socket_by_fd (args->pool, poll_fds[i].fd);
+            http_socket_t *socket = __http_socket_pool__get_socket_by_fd (args->pool, args->pool->fds[i].fd);
             pthread_mutex_unlock (&args->pool->mutex);
 
             if (revents & POLLIN) {
@@ -492,6 +540,7 @@ void *__http_socket_pool_method (void *arg) {
                     should_close = true;
                 }
             }
+
 
             if (revents & POLLOUT) {
                 if (__http_socket_pool__on_writable (args->sock, args->pool, socket) != 0) {
@@ -518,6 +567,9 @@ void *__http_socket_pool_method (void *arg) {
             __http_server_socket_log (args->sock, "Pool received shutdown signal ...");
             break;
         }
+
+        // Sleeps to save CPU usage.
+        usleep (1000);
     }
 
     // Frees the thread pool argument, and returns null.
@@ -565,40 +617,9 @@ http_socket_t *__http_server__accept_socket (http_server_socket_t *sock) {
 
     // Allocates the memory required to keep the HTTP socket, if this fails
     //  close the FD and return null.
-    http_socket_t *socket = (http_socket_t *) calloc (1, sizeof (http_socket_t));
+    http_socket_t *socket = http_socket_new ();
     if (socket == NULL) {
         close (fd);
-        return NULL;
-    }
-
-    // Create the read line buffer.
-    socket->read_line_buffer = http_line_buffer_create ();
-    if (socket->read_line_buffer == NULL) {
-        close (fd);
-        free (socket);
-        return NULL;
-    }
-
-    // Create the write line buffer.
-    socket->write_line_buffer = http_line_buffer_create ();
-    if (socket->write_line_buffer == NULL) {
-        close (fd);
-
-        http_line_buffer_free (&socket->read_line_buffer);
-
-        free (socket);
-        return NULL;
-    }
-
-    // Creates the line buffer.
-    socket->recv_buffer = (char *) malloc (HTTP_SOCKET_RECV_BUFFER_SIZE);
-    if (socket->recv_buffer == NULL) {
-        close (fd);
-
-        http_line_buffer_free (&socket->read_line_buffer);
-        http_line_buffer_free (&socket->write_line_buffer);
-
-        free (socket);
         return NULL;
     }
 
@@ -624,7 +645,7 @@ void __http_server_acceptor__register_socket (http_server_socket_t *sock, http_s
 
     // Unlocks the mutex and logs that we've registered the socket.
     pthread_mutex_unlock (&sock->acceptor_mutex);
-    __http_server_socket_log (sock, "Registering socket to pool %lu", sock->thread_pool_register_next);
+    // __http_server_socket_log (sock, "Registering socket to pool %lu", sock->thread_pool_register_next);
 
 }
 
@@ -637,7 +658,7 @@ void *__http_server_acceptor (void *arg) {
         http_socket_t *socket = NULL;
         if ((socket = __http_server__accept_socket (sock)) != NULL) {
             char *addr = __http_helper__thread_safe__inet_ntoa (socket->address.sin_addr);
-            __http_server_socket_log (sock, "Accepted %s:%u", addr, ntohs (socket->address.sin_port));
+            // __http_server_socket_log (sock, "Accepted %s:%u", addr, ntohs (socket->address.sin_port));
             free (addr);
 
             __http_server_acceptor__register_socket (sock, socket);
@@ -679,12 +700,17 @@ int32_t http_server_start_acceptor (http_server_socket_t *sock, bool in_new_thre
 
 /// Stops the acceptor.
 int32_t __http_server_socket_stop_acceptor (http_server_socket_t *sock) {
-    // Joints the thread, so we basically wait for it to quit.
+    // Cancels the thread.
     if (pthread_cancel (sock->acceptor_thread) != 0) {
-        perror ("pthread_join () failed");
+        perror ("pthread_cancel () failed");
         return -1;
     }
 
+    // Joints the thread
+    if (pthread_join (sock->acceptor_thread, NULL) != 0) {
+        perror ("pthread_join () failed");
+        return -1;
+    }
 
     return 0;
 }

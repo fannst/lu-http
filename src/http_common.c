@@ -20,3 +20,19 @@
 void errc_print (const char *message) {
     fprintf (stderr, "[LUHTTP ERR] %s: %d -> %s\n", message, errno, strerror (errno));
 }
+
+/// Compares two strings case insensitive.
+bool strcicmp (const char *a, const char *b) {
+    for (;;) {
+        if (tolower (*a) != tolower (*b))
+            return false;
+
+        ++a;
+        ++b;
+
+        if (*a == '\0' && *b == '\0')
+            return true;
+        else if (*a == '\0' || *b == '\0')
+            return false;
+    }
+}
