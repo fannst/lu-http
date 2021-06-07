@@ -27,16 +27,27 @@ void *recurring_thread (void *u) {
     }
 }
 
+void on_http_request (http_socket_t *socket, const http_request_t *request, http_response_t *response) {
+    printf ("Received request!\r\n");
+
+    // Sets the response code.
+    http_response_set_code (response, 200);
+
+    // Writes text.
+    http_response_write_text (socket, response, HTTP_CONTENT_TYPE_TEXT_HTML, "<h1>Hello World</h1>!\r\n");
+}
+
 int main (int argc, char **argv) {
+    signal(SIGPIPE, SIG_IGN);
     srand (time (NULL));
 
     pthread_t thread;
     pthread_create (&thread, NULL, recurring_thread, NULL);
 
-//     http_response_prepare_default_headers ();
+    http_response_prepare_default_headers ();
     http_helpers_init ();
 
-    http_server_socket_t *sock = http_server_socket_create(8, 1024);
+    http_server_socket_t *sock = http_server_socket_create(8, 1024, on_http_request);
 
     http_server_socket_init (sock);
     http_server_socket_configure (sock, 8080, "0.0.0.0", 20);
@@ -53,25 +64,7 @@ int main (int argc, char **argv) {
 
     http_server_socket_stop (sock);
     http_server_socket_free (&sock);
-//
-//     http_response_t resp = {
-//         .headers = http_headers_new ()
-//     };
-//
-//     __http_response_add_default_headers (&resp);
-//
-//     http_headers_to_string_no_collapse (resp.headers, print_header, NULL);
-//
-//     http_headers_free (&resp.headers);
-//
-//     const char *headers = "Some-Header: Hello World!\r\n"
-//     "Some-Other-Header: Cool!\r\n"
-//     "Some-Other-Header Cool!\r\n"
-//     "\r\n";
-//
-//     http_headers_t *h = parse_http_headers ((char *) headers, HTTP_PARSE_HEADER_FLAG_KEEP_INTACT);
-//     http_headers_free (&h);
 
-//     http_response_free_default_headers ();
+    http_response_free_default_headers ();
     return 0;
 }

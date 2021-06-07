@@ -14,19 +14,24 @@
     limitations under the License.
 */
 
-#ifndef _MAIN_H
-#define _MAIN_H
+#ifndef _HTTP_VERSION_H
+#define _HTTP_VERSION_H
 
-#include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
-#include <signal.h>
+#include <string.h>
 
-#include "http_socket.h"
-#include <http_header.h>
-#include <http_response.h>
-#include <http_helpers.h>
+typedef enum {
+    HTTP_VERSION_INVALID = 0,
+    HTTP_VERSION_1_0,
+    HTTP_VERSION_1_1,
+    HTTP_VERSION_2,
+    HTTP_VERSION_3
+} http_version_t;
 
-int main (int argc, char **argv);
+/// Parses an HTTP version from string.
+http_version_t http_version_from_string (const char *str);
+
+/// Returns the string version of version.
+const char *http_version_to_string (http_version_t version);
 
 #endif

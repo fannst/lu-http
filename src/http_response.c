@@ -15,14 +15,44 @@
 */
 
 #include "http_response.h"
+#include "http_socket.h"
 
-const char *X_SERVER_HEADER_KEY = "X-Server";
+const char *X_SERVER_HEADER_KEY = "Server";
 const char *X_SERVER_HEADER_VALUE_NAME = "LukeHTTP V1.0";
 
 const char *DATE_HEADER_KEY = "Date";
 const char *DATE_HEADER__DATE_FORMAT = "%a, %d %b %Y %X %Z";
+
+const char *CONTENT_TYPE_KEY = "Content-Type";
+const char *CONTENT_LENGTH_KEY = "Content-Length";
  
 http_headers_t *g_DefaultHeaders = NULL;
+
+/// Creates new HTTP response.
+http_response_t *http_response_new (void) {
+    http_response_t *res = (http_response_t *) calloc (1, sizeof (http_response_t));
+    if (res == NULL)
+        return NULL;
+
+    res->headers = http_headers_new ();
+    if (res->headers == NULL) {
+        free (res);
+        return NULL;
+    }
+
+    return res;
+}
+
+/// Frees an HTTP response.
+int32_t http_response_free (http_response_t **response) {
+    if (http_headers_free (&((*response)->headers)) == -1)
+        return -1;
+    
+    free (*response);
+    *response = NULL;
+
+    return 0;
+}
 
 /// Adds the X-Server header to the specified headers.
 int32_t __http_add_x_server_header (char *buffer, size_t buffer_size, http_headers_t *headers) {
@@ -64,7 +94,14 @@ int32_t __http_add_content_type_header (char *buffer, size_t buffer_size, http_h
         return -1;
     
     snprintf (buffer, buffer_size, "%s", content_type_string);
-    http_headers_insert (headers, DATE_HEADER_KEY, buffer, HTTP_HEADER_INSERT_FLAG_COPY_VALUE | HTTP_HEADER_INSERT_FLAG_END);
+    http_headers_insert (headers, CONTENT_TYPE_KEY, buffer, HTTP_HEADER_INSERT_FLAG_COPY_VALUE | HTTP_HEADER_INSERT_FLAG_END);
+
+    return 0;
+}
+
+int32_t __http_add_content_length_header (char *buffer, size_t buffer_size, http_headers_t *headers, size_t len) {
+    snprintf (buffer, buffer_size, "%lu", len);
+    http_headers_insert (headers, CONTENT_LENGTH_KEY, buffer, HTTP_HEADER_INSERT_FLAG_COPY_VALUE | HTTP_HEADER_INSERT_FLAG_END);
 
     return 0;
 }
@@ -114,5 +151,68 @@ int32_t __http_response_add_default_headers (http_response_t *response) {
 
     free (buffer);
     
+    return 0;
+}
+
+/// Writes an text response to the client.
+int32_t http_response_write_text (http_socket_t *socket, http_response_t *response, http_content_type_t type, const char *text) {    
+    static const size_t buffer_size = 2048;
+    char *buffer = (char *) malloc (buffer_size);
+
+    if (__http_response_add_default_headers (response) != 0) {
+        free (buffer);
+        return -1;
+    } else if (__http_add_content_type_header (buffer, buffer_size, response->headers, type) != 0) {
+        free (buffer);
+        return -2;
+    } else if (__http_add_content_length_header (buffer, buffer_size, response->headers, strlen (text)) != 0) {
+        free (buffer);
+        return -3;
+    }
+
+    free (buffer);
+
+    http_write_response_head (socket, response);
+    http_response_write_headers (socket, response);
+    http_segmented_buffer_append (socket->write_segmented_buffer, http_segmented_buffer_segment_create_from_string (text));
+
+    return 0;
+}
+
+// Writes an file to the client.
+int32_t http_respone_write_file (http_socket_t *socket, http_response_t *response, const char *file) {
+    return 0;
+}
+
+void __http_response_write_headers__write_method (const char *header, void *u) {
+    http_socket_t *socket = (http_socket_t *) u;
+    http_segmented_buffer_append (socket->write_segmented_buffer,
+        http_segmented_buffer_segment_create_from_string (header));
+}
+
+/// Writes the HTTP response headers.
+int32_t http_response_write_headers (http_socket_t *socket, http_response_t *response) {
+    if (http_headers_to_string_no_collapse (response->headers, __http_response_write_headers__write_method, (void *) socket) != 0)
+        return -1;
+
+    http_segmented_buffer_append (socket->write_segmented_buffer,
+        http_segmented_buffer_segment_create_from_string ("\r\n"));
+    
+    return 0;
+}
+
+/// Writes an HTTP response head.
+int32_t http_write_response_head (http_socket_t *socket, http_response_t *response) {
+    char buffer[98];
+
+    // Formats the response string.
+    snprintf (buffer, sizeof (buffer) / sizeof (char), "%s %u %s\r\n",
+        http_version_to_string (http_response_get_version (response)), http_response_get_code (response),
+        http_code_get_message (http_response_get_code (response)));
+
+    // Writes the response string to the socket.
+    http_segmented_buffer_append (socket->write_segmented_buffer,
+        http_segmented_buffer_segment_create_from_string (buffer));
+
     return 0;
 }

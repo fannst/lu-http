@@ -1,87 +1,5 @@
 #include "http_request.h"
 
-/// Parses an HTTP method from string.
-http_method_t http_method_from_string (const char *str) {
-    if (strcmp (str, "GET") == 0)
-        return HTTP_METHOD_GET;
-    else if (strcmp (str, "HEAD") == 0)
-        return HTTP_METHOD_HEAD;
-    else if (strcmp (str, "POST") == 0)
-        return HTTP_METHOD_POST;
-    else if (strcmp (str, "PUT") == 0)
-        return HTTP_METHOD_PUT;
-    else if (strcmp (str, "DELETE") == 0)
-        return HTTP_METHOD_DELETE;
-    else if (strcmp (str, "TRACE") == 0)
-        return HTTP_METHOD_TRACE;
-    else if (strcmp (str, "OPTIONS") == 0)
-        return HTTP_METHOD_OPTIONS;
-    else if (strcmp (str, "CONNECT") == 0)
-        return HTTP_METHOD_CONNECT;
-    else if (strcmp (str, "PATCH") == 0)
-        return HTTP_METHOD_PATCH;
-
-    return HTTP_METHOD_INVALID;
-}
-
-/// Returns the string version of HTTP method.
-const char *http_method_to_string (http_method_t method) {
-    switch (method) {
-    case HTTP_METHOD_GET:
-        return "GET";
-    case HTTP_METHOD_HEAD:
-        return "HEAD";
-    case HTTP_METHOD_POST:
-        return "POST";
-    case HTTP_METHOD_PUT:
-        return "PUT";
-    case HTTP_METHOD_DELETE:
-        return "DELETE";
-    case HTTP_METHOD_TRACE:
-        return "TRACE";
-    case HTTP_METHOD_OPTIONS:
-        return "OPTIONS";
-    case HTTP_METHOD_CONNECT:
-        return "CONNECT";
-    case HTTP_METHOD_PATCH:
-        return "PATCH";
-    case HTTP_METHOD_INVALID:
-    default:
-        return NULL;
-    }
-}
-
-/// Parses an HTTP version from string.
-http_version_t http_version_from_string (const char *str) {
-    if (strcmp (str, "HTTP/1.0") == 0)
-        return HTTP_VERSION_1_0;
-    else if (strcmp (str, "HTTP/1.1") == 0)
-        return HTTP_VERSION_1_1;
-    else if (strcmp (str, "HTTP/2") == 0)
-        return HTTP_VERSION_2;
-    else if (strcmp (str, "HTTP/3") == 0)
-        return HTTP_VERSION_3;
-    else
-        return HTTP_VERSION_INVALID;
-}
-
-/// Returns the string version of version.
-const char *http_version_to_string (http_version_t version) {
-    switch (version) {
-    case HTTP_VERSION_1_0:
-        return "HTTP/1.0";
-    case HTTP_VERSION_1_1:
-        return "HTTP/1.1";
-    case HTTP_VERSION_2:
-        return "HTTP/2";
-    case HTTP_VERSION_3:
-        return "HTTP/3";
-    case HTTP_VERSION_INVALID:
-    default:
-        return NULL;
-    }
-}
-
 /// Creates an new HTTP request.
 http_request_t *http_request_create (void) {
     // Allocates the memory for the request.
@@ -136,21 +54,9 @@ void http_request_print (http_request_t *request) {
     printf ("- Version: %s\r\n", http_version_to_string (request->version));
     printf ("- Content Type: %s\r\n", http_content_type_to_string (request->content_type));
     printf ("- Content Length: %lu\r\n", request->expected_body_size);
+    printf ("- Body (%lu)\r\n", request->body->segment_count);
     printf ("- Headers:\r\n");
     http_headers_to_string_no_collapse (request->headers, __http_request_print__header_method, NULL);
-
-    if (request->content_type == HTTP_CONTENT_TYPE_TEXT_PLAIN ||
-        request->content_type == HTTP_CONTENT_TYPE_APPLICATION_JSON ||
-        request->content_type == HTTP_CONTENT_TYPE_APPLICATION_X_WWW_FORM_URLENCODED)
-    {
-        printf ("- Body (%lu):\r\n", request->body->segment_count);
-
-        http_segmented_buffer__segment_t *segment = request->body->start;
-        while (segment != NULL) {
-            printf ("%s\r\n", (char *) segment->bytes);
-            segment = segment->next;
-        }
-    }
 }
 
 /// Updates the HTTP request when type state is specified.

@@ -94,7 +94,7 @@ void __http_server_socket_log (http_server_socket_t *sock, const char *format, .
 }
 
 /// Creates an new HTTP server socket instance.
-http_server_socket_t *http_server_socket_create (size_t thread_pool_count, size_t max_socket_count) {
+http_server_socket_t *http_server_socket_create (size_t thread_pool_count, size_t max_socket_count, http_server_callback_t callback) {
     // Allocates the memory required for the server socket structure.
     http_server_socket_t *server_socket = (http_server_socket_t *) calloc (1, sizeof (http_server_socket_t));
     if (server_socket == NULL)
@@ -103,6 +103,7 @@ http_server_socket_t *http_server_socket_create (size_t thread_pool_count, size_
     // Sets the default values.
     server_socket->flags = 0;
     server_socket->thread_pool_count = thread_pool_count;
+    server_socket->callback = callback;
 
     // Allocates the memory for the socket pool-pointer array.
     server_socket->pools = (http_server_socket_pool_t **) malloc (thread_pool_count * sizeof (http_server_socket_pool_t *));
@@ -443,6 +444,30 @@ int32_t __http_socket_pool__on_readable (http_server_socket_t *sock, http_server
     if (http_request_get_state (socket->request) == HTTP_REQUEST_STATE_DONE) {
         // Prints the request headers.
         http_request_print (socket->request);
+
+        // Creates the response.
+        http_response_t *response = http_response_new ();
+        if (response == NULL)
+            return -1;
+
+        printf ("Nigga!\r\n");
+        
+        // Sets the default response values.
+        http_response_set_method (response, http_request_get_method (socket->request));
+        http_response_set_version (response, http_request_get_version (socket->request));
+
+        // Calls the callback.
+        sock->callback (socket, socket->request, response);
+
+        // Frees the response
+        if (http_response_free (&response) != 0)
+            return -1;
+
+        // Resets the request.
+        if (http_request_free (&socket->request) != 0)
+            return -1;
+        else if ((socket->request = http_request_create ()) == 0)
+            return -1;
     }
 
     return 0;
@@ -571,7 +596,7 @@ void *__http_socket_pool_method (void *arg) {
         int poll_rc;
 
     poll_retry:
-        poll_rc = poll (args->pool->fds, args->pool->socket_count, 50);
+        poll_rc = poll (args->pool->fds, args->pool->socket_count, 5);
         if (poll_rc == -1) {
             // Checks if the errno tells us to try again.
             if (errno == EAGAIN)

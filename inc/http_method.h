@@ -14,19 +14,29 @@
     limitations under the License.
 */
 
-#ifndef _MAIN_H
-#define _MAIN_H
+#ifndef _HTTP_METHOD_H
+#define _HTTP_METHOD_H
 
-#include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
-#include <signal.h>
+#include <string.h>
 
-#include "http_socket.h"
-#include <http_header.h>
-#include <http_response.h>
-#include <http_helpers.h>
+typedef enum {
+    HTTP_METHOD_INVALID = 0,
+    HTTP_METHOD_GET,
+    HTTP_METHOD_HEAD,
+    HTTP_METHOD_POST,
+    HTTP_METHOD_PUT,
+    HTTP_METHOD_DELETE,
+    HTTP_METHOD_TRACE,
+    HTTP_METHOD_OPTIONS,
+    HTTP_METHOD_CONNECT,
+    HTTP_METHOD_PATCH
+} http_method_t;
 
-int main (int argc, char **argv);
+/// Returns the string version of HTTP method.
+const char *http_method_to_string (http_method_t method);
+
+/// Parses an HTTP method from string.
+http_method_t http_method_from_string (const char *str);
 
 #endif

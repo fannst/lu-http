@@ -26,8 +26,12 @@
 #include "http_header.h"
 #include "http_content_type.h"
 #include "http_segmented_buffer.h"
+#include "http_method.h"
+#include "http_version.h"
 
 #define http_request_get_state(req) ((req)->state)
+#define http_request_get_version(REQUEST) ((REQUEST)->version)
+#define http_request_get_method(REQUEST) ((REQUEST)->method)
 
 typedef enum {
     HTTP_REQUEST_STATE_RECEIVING_TYPE = 0,          // The request type, path and HTTP version.
@@ -35,27 +39,6 @@ typedef enum {
     HTTP_REQUEST_STATE_RECEIVING_BODY,              // The possible body.
     HTTP_REQUEST_STATE_DONE                         // Preparing response ...
 } http_request_state_t;
-
-typedef enum {
-    HTTP_VERSION_INVALID = 0,
-    HTTP_VERSION_1_0,
-    HTTP_VERSION_1_1,
-    HTTP_VERSION_2,
-    HTTP_VERSION_3
-} http_version_t;
-
-typedef enum {
-    HTTP_METHOD_INVALID = 0,
-    HTTP_METHOD_GET,
-    HTTP_METHOD_HEAD,
-    HTTP_METHOD_POST,
-    HTTP_METHOD_PUT,
-    HTTP_METHOD_DELETE,
-    HTTP_METHOD_TRACE,
-    HTTP_METHOD_OPTIONS,
-    HTTP_METHOD_CONNECT,
-    HTTP_METHOD_PATCH
-} http_method_t;
 
 typedef struct {
     http_request_state_t        state;
@@ -82,18 +65,6 @@ int32_t http_request_free (http_request_t **req);
 
 /// Prints HTTP request info.
 void http_request_print (http_request_t *request);
-
-/// Parses an HTTP method from string.
-http_method_t http_method_from_string (const char *str);
-
-/// Parses an HTTP version from string.
-http_version_t http_version_from_string (const char *str);
-
-/// Returns the string version of HTTP method.
-const char *http_method_to_string (http_method_t method);
-
-/// Returns the string version of version.
-const char *http_version_to_string (http_version_t version);
 
 /// Updates the HTTP request when type state is specified.
 int32_t __http_request_update__type (http_request_t *request, char *line);

@@ -34,6 +34,7 @@
 #include <sys/poll.h>
 #include <malloc.h>
 
+#include "http_response.h"
 #include "http_request.h"
 #include "http_helpers.h"
 #include "http_segmented_buffer.h"
@@ -70,6 +71,8 @@ struct http_socket {
 
 typedef struct http_socket http_socket_t;
 
+typedef void (*http_server_callback_t) (http_socket_t *, const http_request_t *, http_response_t *);
+
 typedef struct {
     pthread_t thread;
     pthread_mutex_t mutex;
@@ -95,6 +98,8 @@ typedef struct {
     pthread_t acceptor_thread;
 
     size_t thread_pool_register_next;
+
+    http_server_callback_t callback;
 } http_server_socket_t;
 
 typedef struct {
@@ -120,7 +125,7 @@ int32_t http_socket_free (http_socket_t **socket);
 void __http_server_socket_log (http_server_socket_t *sock, const char *format, ...);
 
 /// Creates an new HTTP server socket instance.
-http_server_socket_t *http_server_socket_create (size_t thread_pool_count, size_t max_socket_count);
+http_server_socket_t *http_server_socket_create (size_t thread_pool_count, size_t max_socket_count, http_server_callback_t callback);
 
 /// Initializes an HTTP server socket instance.
 int32_t http_server_socket_init (http_server_socket_t *sock);
