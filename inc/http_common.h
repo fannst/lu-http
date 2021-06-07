@@ -30,4 +30,7 @@ void errc_print (const char *message);
 /// Compares two strings case insensitive.
 bool strcicmp (const char *a, const char *b);
 
+/// Gets the extension from an file.
+const char *path_get_ext (const char *path);
+
 #endif

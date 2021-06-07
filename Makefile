@@ -7,34 +7,34 @@ GCC									:= gcc
 SIZE								:= size
 
 # General Files
-FIRMWARE_ELF					:= firmware.elf
+FIRMWARE_ELF						:= firmware.elf
 
 # GCC Arguments
-GCC_ARGS						+= -Wall
-GCC_ARGS						+= -Werror
-GCC_ARGS						+= -pthread
-GCC_ARGS						+= -D_GNU_SOURCE
-GCC_ARGS						+= -ggdb
+GCC_ARGS							+= -Wall
+GCC_ARGS							+= -Werror
+GCC_ARGS							+= -pthread
+GCC_ARGS							+= -D_GNU_SOURCE
+GCC_ARGS							+= -ggdb
 
-GCC_ARGS						+= -I./inc
+GCC_ARGS							+= -I./inc
 
 # GPP Arguments
-GPP_ARGS						+= $(GCC_ARGS)
+GPP_ARGS							+= $(GCC_ARGS)
 
 # Size Arguments
-SIZE_ARGS						+= --format=gnu
-SIZE_ARGS						+= --radix=10
-SIZE_ARGS						+= --common
-SIZE_ARGS						+= $(FIRMWARE_ELF)
+SIZE_ARGS							+= --format=gnu
+SIZE_ARGS							+= --radix=10
+SIZE_ARGS							+= --common
+SIZE_ARGS							+= $(FIRMWARE_ELF)
 
 # Files
-GPP_SOURCES						+= $(shell find ./src -name *.cc)
-C_SOURCES						+= $(shell find ./src -name *.c)
-S_SOURCES						+= $(shell find ./src -name *.s)
+GPP_SOURCES							+= $(shell find ./src -name *.cc)
+C_SOURCES							+= $(shell find ./src -name *.c)
+S_SOURCES							+= $(shell find ./src -name *.s)
 
-OBJECTS							+= $(GPP_SOURCES:.cc=.arm.o)
-OBJECTS							+= $(C_SOURCES:.c=.arm.o)
-OBJECTS							+= $(S_SOURCES:.s=.arm.o)
+OBJECTS								+= $(GPP_SOURCES:.cc=.arm.o)
+OBJECTS								+= $(C_SOURCES:.c=.arm.o)
+OBJECTS								+= $(S_SOURCES:.s=.arm.o)
 
 # Compilation
 %.arm.o: %.s

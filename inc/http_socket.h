@@ -21,18 +21,21 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
-#include <sys/socket.h>
 #include <unistd.h>
-#include <netinet/in.h>
 #include <string.h>
 #include <errno.h>
 #include <pthread.h>
-#include <arpa/inet.h>
 #include <fcntl.h>
 #include <stdarg.h>
-#include <sys/ioctl.h>
-#include <sys/poll.h>
 #include <malloc.h>
+
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <sys/sendfile.h>
+#include <sys/poll.h>
 
 #include "http_response.h"
 #include "http_request.h"
@@ -53,19 +56,50 @@
 // Data Types
 ///////////////////////////////////////////////////////////////////////////////
 
+
+typedef enum {
+    HTTP_SOCKET_WRITE_OP_BYTES,                 /* Large Binary Buffer */
+    HTTP_SOCKET_WRITE_OP_FILE                   /* Read All From File */
+} http_socket_write_op_type_t;
+
+#define HTTP_SOCKET_WRITE_OP_FLAG__CLOSE_SOCK_AFTER     (1 << 0)
+#define HTTP_SOCKET_WRITE_OP_FLAG__FREE_BYTES           (1 << 1)
+#define HTTP_SOCKET_WRITE_OP_FLAG__CLOSE_FD             (1 << 2)
+
+/// Doing all in one structure to avoid too-small memory allocations, and after all
+///  who gives a damn about idk a few bytes? Maybe you.. Fag.
+struct http_socket_write_op {
+    http_socket_write_op_type_t         op;
+    uint32_t                            flags;
+    //---------------------------//
+    uint8_t                            *bytes;
+    size_t                              size;
+    size_t                              bytes_written;
+    FILE                               *file;
+    off_t                               file_offset;
+    //---------------------------//
+    struct http_socket_write_op        *next;
+    struct http_socket_write_op        *prev;
+};
+typedef struct http_socket_write_op http_socket_write_op_t;
+
 struct http_socket {
-    struct sockaddr_in address;
-    int32_t fd;
-    int64_t last_active;
-    uint32_t flags;
+    struct sockaddr_in                  address;
+    //---------------------------//
 
-    struct http_socket *next, *prev;
-
-    http_segmented_buffer_t *write_segmented_buffer;
-
-    size_t recv_buffer_level;
-    uint8_t *recv_buffer;
-
+    int32_t                             fd;
+    int64_t                             creation_time;
+    uint32_t                            flags;
+    //---------------------------//
+    struct http_socket                 *next;
+    struct http_socket                 *prev;
+    http_socket_write_op_t             *write_start;
+    http_socket_write_op_t             *write_end;
+    size_t                              n_pending_write_ops;
+    //---------------------------//
+    size_t                              recv_buffer_level;
+    uint8_t                            *recv_buffer;
+    //---------------------------//
     http_request_t *request;
 };
 
@@ -106,6 +140,43 @@ typedef struct {
     http_server_socket_t *sock;
     http_server_socket_pool_t *pool;
 } __http_socket_pool_method__arg;
+
+///////////////////////////////////////////////////////////////////////////////
+// HTTP Socket Write Operation
+///////////////////////////////////////////////////////////////////////////////
+
+/// Creates an file write operation, for the specified file path.
+http_socket_write_op_t *http_socket_write_op_create__file (const char *path);
+
+/// Creates an binary write operation where the memory get's either copied, or just referenced.
+http_socket_write_op_t *http_socket_write_op_create__binary (uint8_t *data, size_t size, bool should_copy);
+
+/// Creates an write operation.
+http_socket_write_op_t *http_socket_write_op_create (http_socket_write_op_type_t type, void *data, uint32_t flags);
+
+/// Frees an write operation.
+int32_t http_socket_write_op_free (http_socket_write_op_t **op);
+
+/// Writes an file to the socket.
+int32_t __http_socket_write_op_write__file (http_socket_t *socket, http_socket_write_op_t *op);
+
+/// Writes an bytes to the socket.
+int32_t __http_socket_write_op_write__bytes (http_socket_t *socket, http_socket_write_op_t *op);
+
+/// Writes the specified operation.
+int32_t http_socket_write_op_write (http_socket_t *socket, http_socket_write_op_t *op);
+
+/// Enqueues an write operation when there is nothing else inside.
+void __http_socket_enqueue_write_op__single (http_socket_t *socket, http_socket_write_op_t *op);
+
+/// Enqueues an write operation when there is already one inside.
+void __http_socket_enqueue_write_op__multiple (http_socket_t *socket, http_socket_write_op_t *op);
+
+/// Enqueues an write operation to http socket.
+void http_socket_enqueue_write_op (http_socket_t *socket, http_socket_write_op_t *op);
+
+/// Dequeues the last element from the queue, most likely called when written.
+void http_socket_dequeue_write_op (http_socket_t *socket);
 
 ///////////////////////////////////////////////////////////////////////////////
 // HTTP Socket

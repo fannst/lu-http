@@ -16,6 +16,213 @@
 
 #include "http_socket.h"
 
+
+///////////////////////////////////////////////////////////////////////////////
+// HTTP Socket Write Operation
+///////////////////////////////////////////////////////////////////////////////
+
+/// Creates an write operation.
+http_socket_write_op_t *http_socket_write_op_create (http_socket_write_op_type_t type, void *data, uint32_t flags) {
+    // Allocates the structure memory, and returns NULL if failed.
+    http_socket_write_op_t *res = (http_socket_write_op_t *) calloc (1, sizeof (http_socket_write_op_t));
+    if (res == NULL)
+        return NULL;
+
+    // Sets the type of write operation, and the flags.
+    res->op = type;
+    res->flags = flags;
+
+    // Checks the type of operation, and how to interpret the *data.
+    switch (type) {
+    case HTTP_SOCKET_WRITE_OP_BYTES:
+        res->bytes = (uint8_t *) data;
+        break;
+    case HTTP_SOCKET_WRITE_OP_FILE:
+        res->file = (FILE *) data;
+        break;
+    default:
+        break;
+    }
+
+    return res;
+}
+
+/// Creates an file write operation, for the specified file path.
+http_socket_write_op_t *http_socket_write_op_create__file (const char *path) {
+    // Opens the specified file with read permissions, since thjere is no
+    //  way we're going to write to it.
+    FILE *fp = fopen (path, "r");
+    if (fp == NULL) {
+        perror ("fopen () failed");
+        return NULL;
+    }
+    
+    // Returns the resulting write operation
+    http_socket_write_op_t *res = http_socket_write_op_create (HTTP_SOCKET_WRITE_OP_FILE, fp, HTTP_SOCKET_WRITE_OP_FLAG__CLOSE_FD);
+    if (res == NULL) {
+        // Double error LMFAO.
+        if (fclose (fp) != 0)
+            perror ("fclose () failed");
+        return NULL;
+    }
+    
+    // Returns the res op.
+    return res;
+}
+
+/// Creates an binary write operation where the memory get's either copied, or just referenced.
+http_socket_write_op_t *http_socket_write_op_create__binary (uint8_t *data, size_t size, bool should_copy) {
+    // Checks if we're supposed to copy, if so replace the data with copy address.
+    if (should_copy) {
+        uint8_t *copy = (uint8_t *) malloc (size);
+        if (copy == NULL)
+            return NULL;
+
+        memcpy (copy, data, size);
+        data = copy;
+    }
+
+    // Creates the resulting write operation.
+    http_socket_write_op_t *res = http_socket_write_op_create (HTTP_SOCKET_WRITE_OP_BYTES, data, should_copy ? HTTP_SOCKET_WRITE_OP_FLAG__FREE_BYTES : 0);
+    if (res == NULL) {
+        if (should_copy)
+            free (data);
+        return NULL;
+    }
+
+    res->size = size;
+    
+    // Returns the res op.
+    return res;
+}
+
+/// Frees an write operation.
+int32_t http_socket_write_op_free (http_socket_write_op_t **op) {
+    // Checks the type of operation, and how to free it.
+    switch (op[0]->op) {
+    case HTTP_SOCKET_WRITE_OP_BYTES:
+        if (!(op[0]->flags & HTTP_SOCKET_WRITE_OP_FLAG__FREE_BYTES))
+            break;
+
+        free (op[0]->bytes);
+
+        break;
+    case HTTP_SOCKET_WRITE_OP_FILE:
+        if (!(op[0]->flags & HTTP_SOCKET_WRITE_OP_FLAG__CLOSE_FD))
+            break;
+
+        if (fclose (op[0]->file) != 0) {
+            perror ("fclose () failed");
+            return -1;
+        }
+
+        break;
+    default:
+        fprintf (stderr, "Invalid operation type for socket write operation.\r\n");
+        return -2;
+    }
+    
+    // Frees the operation structure.
+    free (*op);
+    *op = NULL;
+
+    // Returns 0, to indicate free went properly.
+    return 0;
+}
+
+/// Writes an bytes to the socket.
+int32_t __http_socket_write_op_write__bytes (http_socket_t *socket, http_socket_write_op_t *op) {
+    int32_t rc = write (socket->fd, &op->bytes[op->bytes_written], op->size - op->bytes_written);
+
+    if (rc == -1) {
+        perror ("write () failed");
+        return -1;
+    } else if (rc == (int32_t) op->size) {
+        return 1;
+    } else op->bytes_written += (size_t) rc;
+
+    return 0;
+}
+
+/// Writes an file to the socket.
+int32_t __http_socket_write_op_write__file (http_socket_t *socket, http_socket_write_op_t *op) {
+    FILE *file = op->file;
+    int32_t rc;
+    
+    if ((rc = sendfile (socket->fd, fileno (file), &op->file_offset, op->size)) < 0) {
+        if (errno == EWOULDBLOCK)
+            return 0;
+        
+        perror ("sendfile () failed");
+        return -1;
+    } else if (rc == 0) {
+        return 1;
+    }
+
+    return 0;
+}
+
+/// Writes the specified operation.
+int32_t http_socket_write_op_write (http_socket_t *socket, http_socket_write_op_t *op) {
+    switch (op->op) {
+    case HTTP_SOCKET_WRITE_OP_BYTES:
+        return __http_socket_write_op_write__bytes (socket, op);
+    case HTTP_SOCKET_WRITE_OP_FILE:
+        return __http_socket_write_op_write__file (socket, op);
+    default:
+        break;
+    }
+
+    return 0;
+}
+
+/// Enqueues an write operation when there is nothing else inside.
+void __http_socket_enqueue_write_op__single (http_socket_t *socket, http_socket_write_op_t *op) {
+    op->next = NULL;
+    op->prev = NULL;
+    
+    socket->write_start = op;
+    socket->write_end = op;
+
+    ++socket->n_pending_write_ops;
+}
+
+/// Enqueues an write operation when there is already one inside.
+void __http_socket_enqueue_write_op__multiple (http_socket_t *socket, http_socket_write_op_t *op) {
+    op->next = socket->write_start;
+    op->prev = NULL;
+    
+    socket->write_start->prev = op;
+    socket->write_start = op;
+    
+    ++socket->n_pending_write_ops;
+}
+
+/// Enqueues an write operation to http socket.
+void http_socket_enqueue_write_op (http_socket_t *socket, http_socket_write_op_t *op) {
+    if (socket->n_pending_write_ops == 0)
+        __http_socket_enqueue_write_op__single (socket, op);
+    else
+        __http_socket_enqueue_write_op__multiple (socket, op);
+}
+
+/// Dequeues the last element from the queue, most likely called when written.
+void http_socket_dequeue_write_op (http_socket_t *socket) {
+    http_socket_write_op_t *op = socket->write_end;
+    
+    if (socket->n_pending_write_ops > 1) {
+        socket->write_end->prev->next = NULL;
+        socket->write_end = socket->write_end->prev;
+    } else {
+        socket->write_start = NULL;
+        socket->write_end = NULL;
+    }
+
+    http_socket_write_op_free (&op);
+
+    --socket->n_pending_write_ops;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // HTTP Socket
 ///////////////////////////////////////////////////////////////////////////////
@@ -34,19 +241,10 @@ http_socket_t *http_socket_new (void) {
         return NULL;
     }
 
-    res->write_segmented_buffer = http_segmented_buffer_create ();
-    if (res->write_segmented_buffer == NULL) {
-        free (res->recv_buffer);
-        free (res);
-        return NULL;
-    }
-
     // Creates the HTTP request instance, if this fails
     //  free and return NULL.
     res->request = http_request_create ();
     if (res->request == NULL) {
-        http_segmented_buffer_free (&res->write_segmented_buffer);
-
         free (res->recv_buffer);
         free (res);
         
@@ -62,8 +260,14 @@ int32_t http_socket_free (http_socket_t **socket) {
     if (http_request_free (&((*socket)->request)) != 0)
         return -1;
 
-    // Frees the segmented buffers.
-    http_segmented_buffer_free (&((*socket)->write_segmented_buffer));
+    // Frees all the elements in the operation queue, for example
+    //  freeing buffers, closing files etcetera.
+    http_socket_write_op_t *op = socket[0]->write_start;
+    while (op != NULL) {
+        http_socket_write_op_t *next = op->next;
+        http_socket_write_op_free (&op);
+        op = next;
+    }
     
     // Frees the receive buffer.
     free ((*socket)->recv_buffer);
@@ -322,19 +526,14 @@ void __http_server_socket_pool_free (http_server_socket_pool_t **pool) {
 
 /// Gets called when an socket can be written to.
 int32_t __http_socket_pool__on_writable (http_server_socket_t *sock, http_server_socket_pool_t *pool, http_socket_t *socket) {
-    while (socket->write_segmented_buffer->segment_count > 0) {
-        http_segmented_buffer__segment_t *segment = http_segmented_buffer__get_end_segment (socket->write_segmented_buffer);
-
-        int32_t rc = write (socket->fd, &segment->bytes[segment->written], segment->total - segment->written);
-        printf ("%lu\r\n", segment->total);
-        if (rc == -1) {
-            perror ("write () failed");
+    int32_t rc;
+    while (socket->n_pending_write_ops > 0) {
+        http_socket_write_op_t *op = socket->write_end;
+        
+        if ((rc = http_socket_write_op_write (socket, op) != 0) < 0) {
             return -1;
-        } else if (rc == (int32_t) segment->total) {
-            http_segmented_buffer__free_end_segment (socket->write_segmented_buffer);
-        } else {
-            segment->written = (size_t) rc;
-            break;
+        } else if (rc == 1) {
+            http_socket_dequeue_write_op (socket);
         }
     }
 
@@ -443,14 +642,12 @@ int32_t __http_socket_pool__on_readable (http_server_socket_t *sock, http_server
     //  the unser functions can perform the response.
     if (http_request_get_state (socket->request) == HTTP_REQUEST_STATE_DONE) {
         // Prints the request headers.
-        http_request_print (socket->request);
+        // http_request_print (socket->request);
 
         // Creates the response.
         http_response_t *response = http_response_new ();
         if (response == NULL)
             return -1;
-
-        printf ("Nigga!\r\n");
         
         // Sets the default response values.
         http_response_set_method (response, http_request_get_method (socket->request));
@@ -578,7 +775,7 @@ void *__http_socket_pool_method (void *arg) {
 
                 // Checks if we've got anything left to write, if so
                 //  add the pollout event.
-                if (socket->write_segmented_buffer->segment_count > 0)
+                if (socket->n_pending_write_ops > 0)
                     args->pool->fds[i].events |= POLLOUT;
 
                 args->pool->fds[i].fd = socket->fd;
@@ -596,7 +793,7 @@ void *__http_socket_pool_method (void *arg) {
         int poll_rc;
 
     poll_retry:
-        poll_rc = poll (args->pool->fds, args->pool->socket_count, 5);
+        poll_rc = poll (args->pool->fds, args->pool->socket_count, 0);
         if (poll_rc == -1) {
             // Checks if the errno tells us to try again.
             if (errno == EAGAIN)
@@ -639,7 +836,6 @@ void *__http_socket_pool_method (void *arg) {
                 pthread_mutex_lock (&args->pool->mutex);
                 
                 close (socket->fd);
-                __http_server_socket_log (args->sock, "Connection closed to socket %d", socket->fd);
                 __http_socket_pool_unregister__by_fd (args->pool, socket->fd);
 
                 pthread_mutex_unlock (&args->pool->mutex);
@@ -652,8 +848,12 @@ void *__http_socket_pool_method (void *arg) {
             break;
         }
 
-        // Sleeps to save CPU usage.
-        usleep (1000);
+        // Sleeps to save CPU usage, based on the number of clients we will determine
+        //  if it's acceptable to use 100% cpu usage.
+        if (args->pool->socket_count > 50)
+            usleep (0);
+        else
+            usleep (1000);
     }
 
     // Frees the thread pool argument, and returns null.
@@ -710,7 +910,7 @@ http_socket_t *__http_server__accept_socket (http_server_socket_t *sock) {
     // Configures the http socket.
     socket->address = client_addr;
     socket->fd = fd;
-    socket->last_active = time (NULL);
+    socket->creation_time = time (NULL);
 
     // Returns the socket.
     return socket;

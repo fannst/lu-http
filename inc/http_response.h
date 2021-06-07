@@ -80,6 +80,7 @@ int32_t http_response_write_headers (http_socket_t *socket, http_response_t *res
 /// Writes an text response to the client.
 int32_t http_response_write_text (http_socket_t *socket, http_response_t *response, http_content_type_t type, const char *text);
 
-//./
+/// Writes an file to the client.
+int32_t http_response_write_file (http_socket_t *socket, http_response_t *response, const char *path);
 
 #endif

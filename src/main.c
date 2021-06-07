@@ -28,26 +28,29 @@ void *recurring_thread (void *u) {
 }
 
 void on_http_request (http_socket_t *socket, const http_request_t *request, http_response_t *response) {
-    printf ("Received request!\r\n");
-
     // Sets the response code.
     http_response_set_code (response, 200);
 
     // Writes text.
-    http_response_write_text (socket, response, HTTP_CONTENT_TYPE_TEXT_HTML, "<h1>Hello World</h1>!\r\n");
+    http_response_write_file (socket, response, "./static/image.jpg");
 }
 
 int main (int argc, char **argv) {
     signal(SIGPIPE, SIG_IGN);
     srand (time (NULL));
 
+    // Prints some deserved credits.
+    printf ("Lu-HTTP is created by Luke A.C.A. Rieff, it's super fast. I know.\r\n");
+
+    // Creates the thread which will perform some small tasks, for example
+    //  trimming the allocated memory.
     pthread_t thread;
     pthread_create (&thread, NULL, recurring_thread, NULL);
 
     http_response_prepare_default_headers ();
     http_helpers_init ();
 
-    http_server_socket_t *sock = http_server_socket_create(8, 1024, on_http_request);
+    http_server_socket_t *sock = http_server_socket_create(10, 1024, on_http_request);
 
     http_server_socket_init (sock);
     http_server_socket_configure (sock, 8080, "0.0.0.0", 20);

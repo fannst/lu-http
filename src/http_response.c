@@ -95,6 +95,7 @@ int32_t __http_add_content_type_header (char *buffer, size_t buffer_size, http_h
     
     snprintf (buffer, buffer_size, "%s", content_type_string);
     http_headers_insert (headers, CONTENT_TYPE_KEY, buffer, HTTP_HEADER_INSERT_FLAG_COPY_VALUE | HTTP_HEADER_INSERT_FLAG_END);
+    http_headers_insert (headers, "Connection", "keep-alive", HTTP_HEADER_INSERT_FLAG_COPY_VALUE | HTTP_HEADER_INSERT_FLAG_END);
 
     return 0;
 }
@@ -156,7 +157,7 @@ int32_t __http_response_add_default_headers (http_response_t *response) {
 
 /// Writes an text response to the client.
 int32_t http_response_write_text (http_socket_t *socket, http_response_t *response, http_content_type_t type, const char *text) {    
-    static const size_t buffer_size = 2048;
+    static const size_t buffer_size = 128;
     char *buffer = (char *) malloc (buffer_size);
 
     if (__http_response_add_default_headers (response) != 0) {
@@ -174,20 +175,70 @@ int32_t http_response_write_text (http_socket_t *socket, http_response_t *respon
 
     http_write_response_head (socket, response);
     http_response_write_headers (socket, response);
-    http_segmented_buffer_append (socket->write_segmented_buffer, http_segmented_buffer_segment_create_from_string (text));
+    http_socket_enqueue_write_op (socket, http_socket_write_op_create__binary ((uint8_t *) text, strlen (text), true));
 
     return 0;
 }
 
-// Writes an file to the client.
-int32_t http_respone_write_file (http_socket_t *socket, http_response_t *response, const char *file) {
+/// Writes an file to the client.
+int32_t http_response_write_file (http_socket_t *socket, http_response_t *response, const char *path) {
+    // Opens the file specified in the arguments, if this fails print an error
+    //  and return -1.
+    FILE *file = fopen (path, "r");
+    if (file == NULL) {
+        perror ("fopen () error");
+        return -1;
+    }
+
+    // Allocates the buffer used for header generation.
+    static const size_t buffer_size = 128;
+    char *buffer = (char *) malloc (buffer_size);
+
+    // Get the size of the specified file, by seeking to the end, getting the offset
+    //  and rewinding.
+    fseek (file, 0L, SEEK_END);
+    size_t size = ftell (file);
+    rewind (file);
+
+    // Gets the content type.
+    http_content_type_t type = http_content_type_from_ext (path_get_ext (path));
+    if (type == HTTP_CONTENT_TYPE_UNKNOWN)
+        type = HTTP_CONTENT_TYPE_APPLICATION_OCTET_STREAM;
+
+    // Adds the default headers, content type and content length headers.
+    if (__http_response_add_default_headers (response) != 0) {
+        free (buffer);
+        return -1;
+    } else if (__http_add_content_type_header (buffer, buffer_size, response->headers, type) != 0) {
+        free (buffer);
+        return -2;
+    } else if (__http_add_content_length_header (buffer, buffer_size, response->headers, size) != 0) {
+        free (buffer);
+        return -3;
+    }
+
+    // Sends the HTTP response head, and the headers immediately after.
+    http_write_response_head (socket, response);
+    http_response_write_headers (socket, response);
+
+    http_socket_write_op_t *op = http_socket_write_op_create (HTTP_SOCKET_WRITE_OP_FILE, file, HTTP_SOCKET_WRITE_OP_FLAG__CLOSE_FD);
+    if (op == NULL) {
+        free (buffer);
+        return -1;
+    }
+
+    op->size = size;
+
+    http_socket_enqueue_write_op (socket, op);
+
+    // Frees thje header buffer, and returns 0.
+    free (buffer);
     return 0;
 }
 
 void __http_response_write_headers__write_method (const char *header, void *u) {
     http_socket_t *socket = (http_socket_t *) u;
-    http_segmented_buffer_append (socket->write_segmented_buffer,
-        http_segmented_buffer_segment_create_from_string (header));
+    http_socket_enqueue_write_op (socket, http_socket_write_op_create__binary ((uint8_t *) header, strlen (header), true));
 }
 
 /// Writes the HTTP response headers.
@@ -195,9 +246,7 @@ int32_t http_response_write_headers (http_socket_t *socket, http_response_t *res
     if (http_headers_to_string_no_collapse (response->headers, __http_response_write_headers__write_method, (void *) socket) != 0)
         return -1;
 
-    http_segmented_buffer_append (socket->write_segmented_buffer,
-        http_segmented_buffer_segment_create_from_string ("\r\n"));
-    
+    http_socket_enqueue_write_op (socket, http_socket_write_op_create__binary ((uint8_t *) "\r\n", 2, false));
     return 0;
 }
 
@@ -211,8 +260,7 @@ int32_t http_write_response_head (http_socket_t *socket, http_response_t *respon
         http_code_get_message (http_response_get_code (response)));
 
     // Writes the response string to the socket.
-    http_segmented_buffer_append (socket->write_segmented_buffer,
-        http_segmented_buffer_segment_create_from_string (buffer));
+    http_socket_enqueue_write_op (socket, http_socket_write_op_create__binary ((uint8_t *) buffer, strlen (buffer), true));
 
     return 0;
 }

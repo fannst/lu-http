@@ -36,3 +36,8 @@ bool strcicmp (const char *a, const char *b) {
             return false;
     }
 }
+
+/// Gets the extension from an file.
+const char *path_get_ext (const char *path) {
+    return strrchr (path, '.');
+}

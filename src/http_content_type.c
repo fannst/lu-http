@@ -22,6 +22,8 @@ const char *http_content_type_text_css_str = "text/css";
 const char *http_content_type_text_js_str = "text/javascript";
 const char *http_content_type_application_x_www_form_urlencoded_str = "application/x-www-form-urlencoded";
 const char *http_content_type_application_json = "application/json";
+const char *http_content_type_image_jpeg = "image/jpeg";
+const char *http_content_type_application_octet_stream = "application/octet-stream";
 
 /// Gets the string version of an HTTP content type.
 const char *http_content_type_to_string (http_content_type_t type) {
@@ -38,6 +40,10 @@ const char *http_content_type_to_string (http_content_type_t type) {
         return http_content_type_application_x_www_form_urlencoded_str;
     case HTTP_CONTENT_TYPE_APPLICATION_JSON:
         return http_content_type_application_json;
+    case HTTP_CONTENT_TYPE_IMAGE_JPEG:
+        return http_content_type_image_jpeg;
+    case HTTP_CONTENT_TYPE_APPLICATION_OCTET_STREAM:
+        return http_content_type_application_octet_stream;
     default:
         return NULL;
     }
@@ -57,6 +63,20 @@ http_content_type_t http_content_type_from_string (const char *str) {
         return HTTP_CONTENT_TYPE_APPLICATION_X_WWW_FORM_URLENCODED;
     else if (strcmp (str, http_content_type_application_json) == 0)
         return HTTP_CONTENT_TYPE_APPLICATION_JSON;
+    else if (strcmp (str, http_content_type_image_jpeg) == 0)
+        return HTTP_CONTENT_TYPE_IMAGE_JPEG;
+    else if (strcmp (str, http_content_type_application_octet_stream) == 0)
+        return HTTP_CONTENT_TYPE_APPLICATION_OCTET_STREAM;
+    else
+        return HTTP_CONTENT_TYPE_UNKNOWN;
+}
+
+/// Gets the HTTP content type from extension.
+http_content_type_t http_content_type_from_ext (const char *ext) {
+    if (ext == NULL)
+        return HTTP_CONTENT_TYPE_UNKNOWN;
+    else if (strcmp (ext, "jpg") == 0 || strcmp (ext, "jpeg"))
+        return HTTP_CONTENT_TYPE_IMAGE_JPEG;
     else
         return HTTP_CONTENT_TYPE_UNKNOWN;
 }
