@@ -14,21 +14,23 @@
     limitations under the License.
 */
 
-#ifndef _MAIN_H
-#define _MAIN_H
+#ifndef _HTTP_URL_H
+#define _HTTP_URL_H
 
-#include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
-#include <signal.h>
+#include <stdio.h>
+#include <string.h>
+#include <regex.h>
 
-#include "http_socket.h"
-#include "http_header.h"
-#include "http_response.h"
-#include "http_helpers.h"
-#include "http_url.h"
-#include "router/http_router.h"
+typedef struct {
+    char           *path;
+    char           *search;
+} http_url_t;
 
-int main (int argc, char **argv);
+/// Parses an URL.
+int32_t http_url_parse (http_url_t *url, const char *raw);
+
+/// Frees an URL.
+void http_url_free (http_url_t *url);
 
 #endif

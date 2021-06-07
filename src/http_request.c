@@ -51,6 +51,9 @@ int32_t http_request_free (http_request_t **req) {
     // Frees the segmented buffer.
     http_segmented_buffer_free (&(req[0]->body));
 
+    // Frees the url.
+    http_url_free (&(req[0]->parsed_url));
+
     // Frees the URL.
     if ((*req)->url != NULL)
         free ((*req)->url);
@@ -101,6 +104,11 @@ int32_t __http_request_update__type (http_request_t *request, char *line) {
     if ((tok = strtok_r (NULL, " ", &save_ptr)) == NULL)
         return -1;
     request->version = http_version_from_string (tok);
+
+    // Parses the path.
+    if (http_url_parse (&request->parsed_url, request->url) != 0) {
+        return -1;
+    }
 
     // Sets the next state, and returns 0.
     request->state = HTTP_REQUEST_STATE_RECEIVING_HEADERS;

@@ -73,9 +73,14 @@ http_content_type_t http_content_type_from_string (const char *str) {
 
 /// Gets the HTTP content type from extension.
 http_content_type_t http_content_type_from_ext (const char *ext) {
+    if (ext[0] == '.' && ext[1] != '\0')
+        ++ext;
+    
     if (ext == NULL)
         return HTTP_CONTENT_TYPE_UNKNOWN;
-    else if (strcmp (ext, "jpg") == 0 || strcmp (ext, "jpeg"))
+    else if (strcmp (ext, "html") == 0)
+        return HTTP_CONTENT_TYPE_TEXT_HTML;
+    else if (strcmp (ext, "jpg") == 0 || strcmp (ext, "jpeg") == 0)
         return HTTP_CONTENT_TYPE_IMAGE_JPEG;
     else
         return HTTP_CONTENT_TYPE_UNKNOWN;

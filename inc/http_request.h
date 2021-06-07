@@ -27,6 +27,7 @@
 #include "http_content_type.h"
 #include "http_segmented_buffer.h"
 #include "http_method.h"
+#include "http_url.h"
 #include "http_version.h"
 
 #define http_request_get_state(req) ((req)->state)
@@ -49,6 +50,7 @@ typedef struct {
     http_content_type_t         content_type;
     //--//
     http_headers_t             *headers;
+    http_url_t                  parsed_url;
     //--//
     char                       *url;
     //--//

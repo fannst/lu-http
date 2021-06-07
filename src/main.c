@@ -16,6 +16,10 @@
 
 #include "main.h"
 
+http_router_t router = {
+    .entry = NULL
+};
+
 void print_header (const char *memory, void *u) {
     printf ("%s", memory);
 }
@@ -28,11 +32,29 @@ void *recurring_thread (void *u) {
 }
 
 void on_http_request (http_socket_t *socket, const http_request_t *request, http_response_t *response) {
-    // Sets the response code.
-    http_response_set_code (response, 200);
+    int32_t rc = http_router_use (&router, socket, request, response, request->parsed_url.path);
 
-    // Writes text.
-    http_response_write_file (socket, response, "./static/image.jpg");
+    if (rc == 1) {
+        http_response_set_code (response, 404);
+        http_response_write_file (socket, response, "./html/404.html");
+    }
+}
+
+void static_route (http_socket_t *socket, const http_request_t *request, http_response_t *response, const char *path, void *u) {
+    char *file_path = malloc (strlen (path) + strlen ((const char *) u) + 2);
+    sprintf (file_path, "%s/%s", (const char *) u, path);
+
+    http_response_set_code (response, 200);
+    int32_t rc = http_response_write_file (socket, response, file_path);
+    if (rc == -1) {
+        http_response_set_code (response, 404);
+        http_response_write_file (socket, response, "./html/404.html");
+    }
+}
+
+void __main_register_routes () {
+    http_router_t *nigga_route = http_router__register_subroute (&router, "nigga");
+    http_router__register_callback (nigga_route, "static", static_route, "./static");
 }
 
 int main (int argc, char **argv) {
@@ -46,6 +68,9 @@ int main (int argc, char **argv) {
     //  trimming the allocated memory.
     pthread_t thread;
     pthread_create (&thread, NULL, recurring_thread, NULL);
+
+    // Registers the route.
+    __main_register_routes ();
 
     http_response_prepare_default_headers ();
     http_helpers_init ();
