@@ -36,7 +36,7 @@
 
 #include "http_request.h"
 #include "http_helpers.h"
-#include "http_line_buffer.h"
+#include "http_segmented_buffer.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 // Flags and shit
@@ -60,10 +60,10 @@ struct http_socket {
 
     struct http_socket *next, *prev;
 
-    __http_line_buffer_t *read_line_buffer, *write_line_buffer;
+    http_segmented_buffer_t *write_segmented_buffer;
 
     size_t recv_buffer_level;
-    char *recv_buffer;
+    uint8_t *recv_buffer;
 
     http_request_t *request;
 };
@@ -160,6 +160,9 @@ int32_t __http_server_socket_pool_stop (http_server_socket_pool_t *pool);
 void __http_server_socket_pool_free (http_server_socket_pool_t **pool);
 
 ///////////////////////////////////////////////////////////////////////////////
+
+/// Processes the request body line-wise, this is done for headers and type.
+int32_t __http_socket_pool__on_readable__process_lines (http_server_socket_t *sock, http_server_socket_pool_t *pool, http_socket_t *socket);
 
 /// Gets called when an socket can be written to.
 int32_t __http_socket_pool__on_writable (http_server_socket_t *sock, http_server_socket_pool_t *pool, http_socket_t *socket);

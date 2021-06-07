@@ -10,6 +10,19 @@
     },
     "files.associations": {
         "main.h": "c",
-        "http_common.h": "c"
+        "http_common.h": "c",
+        "*.tcc": "c",
+        "cstring": "c",
+        "string": "c",
+        "string_view": "c",
+        "fstream": "c",
+        "iomanip": "c",
+        "istream": "c",
+        "ostream": "c",
+        "sstream": "c",
+        "stdexcept": "c",
+        "system_error": "c",
+        "typeinfo": "c",
+        "variant": "c"
     }
 }

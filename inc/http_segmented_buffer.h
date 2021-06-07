@@ -33,43 +33,42 @@
 // Data Types
 ///////////////////////////////////////////////////////////////////////////////
 
-struct __http_line_buffer__line {
-    char *string;
+struct http_segmented_buffer__segment {
+    uint8_t *bytes;
     size_t written, total;
-
-    struct __http_line_buffer__line *next, *prev;
+    struct http_segmented_buffer__segment *next, *prev;
 };
 
-typedef struct __http_line_buffer__line __http_line_buffer__line_t;
+typedef struct http_segmented_buffer__segment http_segmented_buffer__segment_t;
 
 typedef struct {
-    __http_line_buffer__line_t *start, *end;
-    size_t line_count;
-} __http_line_buffer_t;
+    http_segmented_buffer__segment_t *start, *end;
+    size_t segment_count;
+} http_segmented_buffer_t;
 
 ///////////////////////////////////////////////////////////////////////////////
 // HTTP Line Buffer
 ///////////////////////////////////////////////////////////////////////////////
 
-/// Creates an new http line buffer.
-__http_line_buffer_t *http_line_buffer_create (void);
+/// Creates an new http segmented buffer.
+http_segmented_buffer_t *http_segmented_buffer_create (void);
 
-/// Frees an http line buffer.
-void http_line_buffer_free (__http_line_buffer_t **buffer);
+/// Frees an http segmented buffer.
+void http_segmented_buffer_free (http_segmented_buffer_t **buffer);
 
-/// Creates a new line.
-__http_line_buffer__line_t *http_line_buffer_line_create_from_string (const char *string);
+/// Creates a new segment.
+http_segmented_buffer__segment_t *http_segmented_buffer_segment_create_from_string (const char *string);
 
-/// Creates a line from specified size and string.
-__http_line_buffer__line_t *http_line_buffer_line_create (char *string, size_t len);
+/// Creates a segment from specified size and string.
+http_segmented_buffer__segment_t *http_segmented_buffer_segment_create (uint8_t *bytes, size_t len);
 
-/// Appends one line to the http line buffer.
-int32_t http_line_buffer_append (__http_line_buffer_t *buffer, __http_line_buffer__line_t *line);
+/// Appends one segment to the http line buffer.
+int32_t http_segmented_buffer_append (http_segmented_buffer_t *buffer, http_segmented_buffer__segment_t *line);
 
-/// Reads one line from the http line buffer.
-__http_line_buffer__line_t *http_line_buffer_get_latest_line (__http_line_buffer_t *buffer);
+/// Reads one segment from the http line buffer.
+http_segmented_buffer__segment_t *http_segmented_buffer__get_end_segment (http_segmented_buffer_t *buffer);
 
-/// Frees the latest line from the http line buffer.
-int32_t http_line_buffer_free_latest_line (__http_line_buffer_t *buffer);
+/// Frees the latest segment from the http line buffer.
+int32_t http_segmented_buffer__free_end_segment (http_segmented_buffer_t *buffer);
 
 #endif

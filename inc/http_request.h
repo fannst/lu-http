@@ -25,7 +25,9 @@
 
 #include "http_header.h"
 #include "http_content_type.h"
-#include "http_line_buffer.h"
+#include "http_segmented_buffer.h"
+
+#define http_request_get_state(req) ((req)->state)
 
 typedef enum {
     HTTP_REQUEST_STATE_RECEIVING_TYPE = 0,          // The request type, path and HTTP version.
@@ -35,33 +37,41 @@ typedef enum {
 } http_request_state_t;
 
 typedef enum {
+    HTTP_VERSION_INVALID = 0,
     HTTP_VERSION_1_0,
     HTTP_VERSION_1_1,
     HTTP_VERSION_2,
-    HTTP_VERSION_3,
-    HTTP_VERSION_INVALID
+    HTTP_VERSION_3
 } http_version_t;
 
 typedef enum {
-    HTTP_METHOD_GET, HTTP_METHOD_HEAD, HTTP_METHOD_POST, HTTP_METHOD_PUT, HTTP_METHOD_DELETE,
-    HTTP_METHOD_TRACE, HTTP_METHOD_OPTIONS, HTTP_METHOD_CONNECT, HTTP_METHOD_PATCH,
-    HTTP_METHOD_INVALID
+    HTTP_METHOD_INVALID = 0,
+    HTTP_METHOD_GET,
+    HTTP_METHOD_HEAD,
+    HTTP_METHOD_POST,
+    HTTP_METHOD_PUT,
+    HTTP_METHOD_DELETE,
+    HTTP_METHOD_TRACE,
+    HTTP_METHOD_OPTIONS,
+    HTTP_METHOD_CONNECT,
+    HTTP_METHOD_PATCH
 } http_method_t;
 
 typedef struct {
-    http_request_state_t    state;
-    uint32_t                flags;
-
-    http_method_t           method;
-    http_version_t          version;
-    http_content_type_t     content_type;
-    size_t                  content_length;
-
-    http_headers_t         *headers;
-
-    char                   *url;
-
-    __http_line_buffer_t   *body;
+    http_request_state_t        state;
+    uint32_t                    flags;
+    //--//
+    http_method_t               method;
+    http_version_t              version;
+    http_content_type_t         content_type;
+    //--//
+    http_headers_t             *headers;
+    //--//
+    char                       *url;
+    //--//
+    http_segmented_buffer_t    *body;
+    size_t                      received_body_size;
+    size_t                      expected_body_size;
 } http_request_t;
 
 /// Creates an new HTTP request.
@@ -91,7 +101,7 @@ int32_t __http_request_update__type (http_request_t *request, char *line);
 /// Updates the HTTP request when header state is specified.
 int32_t __http_request_update__headers (http_request_t *request, char *line);
 
-/// Updates the HTTP request with the specified line, this will process it further.
-int32_t http_request_update (http_request_t *request, char *line);
+/// Updates the HTTP request with the specified data, this will process it further.
+int32_t http_request_update (http_request_t *request, uint8_t *data);
 
 #endif

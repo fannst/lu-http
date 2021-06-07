@@ -28,24 +28,14 @@ http_socket_t *http_socket_new (void) {
         return NULL;
 
     // Allocates the receive buffer.
-    res->recv_buffer = (char *) malloc (HTTP_SOCKET_RECV_BUFFER_SIZE);
+    res->recv_buffer = (uint8_t *) malloc (HTTP_SOCKET_RECV_BUFFER_SIZE);
     if (res->recv_buffer == NULL) {
         free (res);
         return NULL;
     }
 
-    // Allocates the memory for the line buffers.
-    res->read_line_buffer = http_line_buffer_create ();
-    if (res->read_line_buffer == NULL) {
-        free (res->recv_buffer);
-        free (res);
-        return NULL;
-    }
-
-    res->write_line_buffer = http_line_buffer_create ();
-    if (res->write_line_buffer == NULL) {
-        http_line_buffer_free (&res->read_line_buffer);
-
+    res->write_segmented_buffer = http_segmented_buffer_create ();
+    if (res->write_segmented_buffer == NULL) {
         free (res->recv_buffer);
         free (res);
         return NULL;
@@ -55,8 +45,7 @@ http_socket_t *http_socket_new (void) {
     //  free and return NULL.
     res->request = http_request_create ();
     if (res->request == NULL) {
-        http_line_buffer_free (&res->read_line_buffer);
-        http_line_buffer_free (&res->write_line_buffer);
+        http_segmented_buffer_free (&res->write_segmented_buffer);
 
         free (res->recv_buffer);
         free (res);
@@ -73,9 +62,8 @@ int32_t http_socket_free (http_socket_t **socket) {
     if (http_request_free (&((*socket)->request)) != 0)
         return -1;
 
-    // Frees the line buffers.
-    http_line_buffer_free (&((*socket)->read_line_buffer));
-    http_line_buffer_free (&((*socket)->write_line_buffer));
+    // Frees the segmented buffers.
+    http_segmented_buffer_free (&((*socket)->write_segmented_buffer));
     
     // Frees the receive buffer.
     free ((*socket)->recv_buffer);
@@ -333,21 +321,89 @@ void __http_server_socket_pool_free (http_server_socket_pool_t **pool) {
 
 /// Gets called when an socket can be written to.
 int32_t __http_socket_pool__on_writable (http_server_socket_t *sock, http_server_socket_pool_t *pool, http_socket_t *socket) {
-    while (socket->write_line_buffer->line_count > 0) {
-        __http_line_buffer__line_t *line = http_line_buffer_get_latest_line (socket->write_line_buffer);
+    while (socket->write_segmented_buffer->segment_count > 0) {
+        http_segmented_buffer__segment_t *segment = http_segmented_buffer__get_end_segment (socket->write_segmented_buffer);
 
-        int32_t rc = write (socket->fd, &line->string[line->written], line->total - line->written);
-        printf ("%lu\r\n", line->total);
+        int32_t rc = write (socket->fd, &segment->bytes[segment->written], segment->total - segment->written);
+        printf ("%lu\r\n", segment->total);
         if (rc == -1) {
             perror ("write () failed");
             return -1;
-        } else if (rc == (int32_t) line->total) {
-            http_line_buffer_free_latest_line (socket->write_line_buffer);
+        } else if (rc == (int32_t) segment->total) {
+            http_segmented_buffer__free_end_segment (socket->write_segmented_buffer);
         } else {
-            line->written = (size_t) rc;
+            segment->written = (size_t) rc;
             break;
         }
     }
+
+    return 0;
+}
+
+/// Processes the request body line-wise, this is done for headers and type.
+int32_t __http_socket_pool__on_readable__process_lines (http_server_socket_t *sock, http_server_socket_pool_t *pool, http_socket_t *socket) {
+    size_t offset = 0;
+    for (;;) {
+        uint8_t *start = &socket->recv_buffer[offset];
+        uint8_t *lf = memchr ((const void *) start, '\n', socket->recv_buffer_level - offset);
+        if (lf == NULL) {
+            break;
+        }
+
+        size_t line_len = lf - start;
+        if (line_len > 1) {
+            lf [lf[-1] == '\r' ? -1 : 0] = '\0';
+
+            http_request_update (socket->request, start);
+        } else {
+            http_request_update (socket->request, (uint8_t *) "");
+        }
+
+        offset += line_len + 1;
+
+        if (http_request_get_state (socket->request) == HTTP_REQUEST_STATE_RECEIVING_BODY || http_request_get_state (socket->request) == HTTP_REQUEST_STATE_DONE) {
+            break;
+        }
+    }
+
+    // Moves the buffer so we can read more in the future.
+    memmove (socket->recv_buffer, &socket->recv_buffer[offset], socket->recv_buffer_level - offset);
+    socket->recv_buffer[socket->recv_buffer_level - offset] = '\0';
+    socket->recv_buffer_level -= offset;
+
+    return 0;
+}
+
+/// Processes the request body binary, this is done for the body.
+int32_t __http_socket_pool__on_readable__process_binary (http_server_socket_t *sock, http_server_socket_pool_t *pool, http_socket_t *socket) {
+    size_t size = socket->recv_buffer_level;
+    if (size >= socket->request->expected_body_size) {
+        size = socket->request->expected_body_size;
+    }
+
+    printf ("%s: %lu\r\n", socket->recv_buffer, size);
+
+    // Allocates the memory required for the segment.    
+    uint8_t *segment = (uint8_t *) malloc (size);
+    if (segment == NULL)
+        return -1;
+        
+    memcpy (segment, socket->recv_buffer, size);
+
+    // Appends the new segment the segmented buffer.
+    if (http_segmented_buffer_append (socket->request->body, http_segmented_buffer_segment_create (segment, size)) != 0)
+        return -2;
+
+    // Trims the buffer, and removes the read bytes from the buffer level.
+    memmove (socket->recv_buffer, &socket->recv_buffer[size - 1], size);
+    
+    socket->recv_buffer_level -= size;
+    socket->request->received_body_size += size;
+
+    // Checks if we're done receiving the body, if so we're going to update the request
+    //  state and set it to done.
+    if (socket->request->received_body_size == socket->request->expected_body_size)
+        socket->request->state = HTTP_REQUEST_STATE_DONE;
 
     return 0;
 }
@@ -365,31 +421,29 @@ int32_t __http_socket_pool__on_readable (http_server_socket_t *sock, http_server
         break;
     }
 
+    // Adds the received bytes to the receive buffer level.
     socket->recv_buffer_level += (size_t) rc;
 
-    // Reads all the lines from the buffer.
-    size_t offset = 0;
-    for (;;) {
-        char *start = &socket->recv_buffer[offset];
-        char *lf = memchr ((const void *) start, '\n', socket->recv_buffer_level - offset);
-        if (lf == NULL) {
-            break;
-        }
+    // Checks if we're dealing with binary or text-like data, this might actually
+    //  read the complete headers, and that's why we next check if we're
+    //  receiving the body.
+    if (http_request_get_state (socket->request) != HTTP_REQUEST_STATE_RECEIVING_BODY)
+        if (__http_socket_pool__on_readable__process_lines (sock, pool, socket) != 0)
+            return -1;
 
-        size_t line_len = lf - start;
-        if (line_len > 1) {
-            lf [lf[-1] == '\r' ? -1 : 0] = '\0';
-            http_line_buffer_append (socket->read_line_buffer, http_line_buffer_line_create_from_string (start));
-        } else {
-            http_line_buffer_append (socket->read_line_buffer, http_line_buffer_line_create_from_string (""));
-        }
+    // Checks if we're supposed to now read binary data, for example the body.
+    //  We're doing this in a separate if, since the process lines might
+    //  have modified the way we should treat the data.
+    if (http_request_get_state (socket->request) == HTTP_REQUEST_STATE_RECEIVING_BODY)
+        if (__http_socket_pool__on_readable__process_binary (sock, pool, socket) != 0)
+            return -1;
 
-        offset += line_len + 1;
+    // Checks if the request is done, if so call the request done callback, so
+    //  the unser functions can perform the response.
+    if (http_request_get_state (socket->request) == HTTP_REQUEST_STATE_DONE) {
+        // Prints the request headers.
+        http_request_print (socket->request);
     }
-
-    // Moves the buffer so we can read more in the future.
-    memmove (socket->recv_buffer, &socket->recv_buffer[offset], socket->recv_buffer_level - offset);
-    socket->recv_buffer_level -= offset;
 
     return 0;
 }
@@ -499,7 +553,7 @@ void *__http_socket_pool_method (void *arg) {
 
                 // Checks if we've got anything left to write, if so
                 //  add the pollout event.
-                if (socket->write_line_buffer->line_count > 0)
+                if (socket->write_segmented_buffer->segment_count > 0)
                     args->pool->fds[i].events |= POLLOUT;
 
                 args->pool->fds[i].fd = socket->fd;
