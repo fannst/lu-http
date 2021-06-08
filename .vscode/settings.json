@@ -23,6 +23,7 @@
         "stdexcept": "c",
         "system_error": "c",
         "typeinfo": "c",
-        "variant": "c"
+        "variant": "c",
+        "http_accept_range.h": "c"
     }
 }

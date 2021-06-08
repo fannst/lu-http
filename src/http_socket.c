@@ -135,7 +135,8 @@ int32_t __http_socket_write_op_write__bytes (http_socket_t *socket, http_socket_
     int32_t rc = write (socket->fd, &op->bytes[op->bytes_written], op->size - op->bytes_written);
 
     if (rc == -1) {
-        perror ("write () failed");
+        if (errno != EPIPE) // We don't care about PIPE lol!
+            perror ("write () failed");
         return -1;
     } else if (rc == (int32_t) op->size) {
         return 1;
@@ -152,8 +153,8 @@ int32_t __http_socket_write_op_write__file (http_socket_t *socket, http_socket_w
     if ((rc = sendfile (socket->fd, fileno (file), &op->file_offset, op->size)) < 0) {
         if (errno == EWOULDBLOCK)
             return 0;
-        
-        perror ("sendfile () failed");
+        else if (errno != EPIPE && errno != ECONNRESET)
+            perror ("sendfile () failed");
         return -1;
     } else if (rc == 0) {
         return 1;
@@ -615,7 +616,8 @@ int32_t __http_socket_pool__on_readable (http_server_socket_t *sock, http_server
     case 0:
         return -1;
     case -1:
-        perror ("recv () failed");
+        if (errno != ECONNRESET)
+            perror ("recv () failed");
         return -2;
     default:
         break;

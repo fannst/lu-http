@@ -24,6 +24,7 @@ const char *http_content_type_application_x_www_form_urlencoded_str = "applicati
 const char *http_content_type_application_json = "application/json";
 const char *http_content_type_image_jpeg = "image/jpeg";
 const char *http_content_type_application_octet_stream = "application/octet-stream";
+const char *http_content_type_video_mp4 = "video/mp4";
 
 /// Gets the string version of an HTTP content type.
 const char *http_content_type_to_string (http_content_type_t type) {
@@ -44,6 +45,8 @@ const char *http_content_type_to_string (http_content_type_t type) {
         return http_content_type_image_jpeg;
     case HTTP_CONTENT_TYPE_APPLICATION_OCTET_STREAM:
         return http_content_type_application_octet_stream;
+    case HTTP_CONTENT_TYPE_VIDEO_MP4:
+        return http_content_type_video_mp4;
     default:
         return NULL;
     }
@@ -67,6 +70,8 @@ http_content_type_t http_content_type_from_string (const char *str) {
         return HTTP_CONTENT_TYPE_IMAGE_JPEG;
     else if (strcmp (str, http_content_type_application_octet_stream) == 0)
         return HTTP_CONTENT_TYPE_APPLICATION_OCTET_STREAM;
+    else if (strcmp (str, http_content_type_video_mp4) == 0)
+        return HTTP_CONTENT_TYPE_VIDEO_MP4;
     else
         return HTTP_CONTENT_TYPE_UNKNOWN;
 }
@@ -82,6 +87,8 @@ http_content_type_t http_content_type_from_ext (const char *ext) {
         return HTTP_CONTENT_TYPE_TEXT_HTML;
     else if (strcmp (ext, "jpg") == 0 || strcmp (ext, "jpeg") == 0)
         return HTTP_CONTENT_TYPE_IMAGE_JPEG;
+    else if (strcmp (ext, ".mp4") == 0)
+        return HTTP_CONTENT_TYPE_VIDEO_MP4;
     else
         return HTTP_CONTENT_TYPE_UNKNOWN;
 }

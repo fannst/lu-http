@@ -25,6 +25,9 @@ const char *DATE_HEADER__DATE_FORMAT = "%a, %d %b %Y %X %Z";
 
 const char *CONTENT_TYPE_KEY = "Content-Type";
 const char *CONTENT_LENGTH_KEY = "Content-Length";
+
+const char *ACCEPT_RANGES_KEY = "Accept-Ranges";
+const char *RANGE_KEY = "Range";
  
 http_headers_t *g_DefaultHeaders = NULL;
 
@@ -107,6 +110,11 @@ int32_t __http_add_content_length_header (char *buffer, size_t buffer_size, http
     return 0;
 }
 
+void __http_add_accept_range_header (char *buffer, size_t buffer_size, http_headers_t *headers, http_range_unit_t range) {
+    snprintf (buffer, buffer_size, "%s", http_accept_range_to_string (range));
+    http_headers_insert (headers, ACCEPT_RANGES_KEY, buffer, HTTP_HEADER_INSERT_FLAG_COPY_VALUE | HTTP_HEADER_INSERT_FLAG_END);
+}
+
 /// Gets called at startup of server, prepares the default headers.
 int32_t http_response_prepare_default_headers (void) {
     if (g_DefaultHeaders != NULL)
@@ -186,7 +194,8 @@ int32_t http_response_write_file (http_socket_t *socket, http_response_t *respon
     //  and return -1.
     FILE *file = fopen (path, "r");
     if (file == NULL) {
-        perror ("fopen () error");
+        if (errno != ENOENT)
+            perror ("fopen () error");
         return -1;
     }
 
@@ -217,19 +226,26 @@ int32_t http_response_write_file (http_socket_t *socket, http_response_t *respon
         return -3;
     }
 
+    __http_add_accept_range_header (buffer, buffer_size, response->headers, HTTP_ACCEPT_RANGE_BYTES);
+
     // Sends the HTTP response head, and the headers immediately after.
     http_write_response_head (socket, response);
     http_response_write_headers (socket, response);
 
-    http_socket_write_op_t *op = http_socket_write_op_create (HTTP_SOCKET_WRITE_OP_FILE, file, HTTP_SOCKET_WRITE_OP_FLAG__CLOSE_FD);
-    if (op == NULL) {
-        free (buffer);
-        return -1;
+    // Checks if we need to write body.
+    if (http_response_get_method (response) != HTTP_METHOD_HEAD) {
+        http_socket_write_op_t *op = http_socket_write_op_create (HTTP_SOCKET_WRITE_OP_FILE, file, HTTP_SOCKET_WRITE_OP_FLAG__CLOSE_FD);
+        if (op == NULL) {
+            free (buffer);
+            return -1;
+        }
+
+        op->size = size;
+        http_socket_enqueue_write_op (socket, op);
+    } else {
+        if (fclose (file) != 0)
+            perror ("fclose () failed");
     }
-
-    op->size = size;
-
-    http_socket_enqueue_write_op (socket, op);
 
     // Frees thje header buffer, and returns 0.
     free (buffer);

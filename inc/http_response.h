@@ -30,6 +30,7 @@
 #include "http_method.h"
 #include "http_version.h"
 #include "http_code.h"
+#include "http_accept_range.h"
 
 #define http_response_set_code(RESPONSE, CODE) ((RESPONSE)->code = (CODE))
 #define http_response_set_method(RESPONSE, METHOD) ((RESPONSE)->method = (METHOD))
@@ -37,6 +38,7 @@
 
 #define http_response_get_version(RESPONSE) ((RESPONSE)->version)
 #define http_response_get_code(RESPONSE) ((RESPONSE)->code)
+#define http_response_get_method(RESPONSE) ((RESPONSE)->method)
 
 struct http_socket;
 typedef struct http_socket http_socket_t;

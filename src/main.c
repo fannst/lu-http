@@ -53,8 +53,7 @@ void static_route (http_socket_t *socket, const http_request_t *request, http_re
 }
 
 void __main_register_routes () {
-    http_router_t *nigga_route = http_router__register_subroute (&router, "nigga");
-    http_router__register_callback (nigga_route, "static", static_route, "./static");
+    http_router__register_callback (&router, "static", static_route, "./static");
 }
 
 int main (int argc, char **argv) {
