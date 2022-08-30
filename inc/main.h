@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <argp.h>
 #include <signal.h>
 
 #include "http_socket.h"

@@ -17,7 +17,7 @@
 #include "http_accept_range.h"
 
 /// Gets the string version of the accept range.
-const char *http_accept_range_to_string (http_accept_range_t range) {
+const char *http_accept_range_to_string (http_range_unit_t range) {
     switch (range)
     {
     case HTTP_ACCEPT_RANGE_BYTES:
